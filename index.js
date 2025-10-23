@@ -51,9 +51,9 @@ app.post("/create_preference", async (req, res) => {
         currency_id: "ARS",
       })),
       back_urls: {
-        success: "https://personaldegastronomia.com/exito",
-        failure: "https://personaldegastronomia.com/error",
-        pending: "https://personaldegastronomia.com/pendiente",
+        success: process.env.URL_FRONT,
+        failure: process.env.URL_FRONT,
+        pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
     };
