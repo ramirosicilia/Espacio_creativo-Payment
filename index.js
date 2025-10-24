@@ -4,14 +4,14 @@ import cors from "cors";
 import dotenv from "dotenv";
 import morgan from "morgan";
 import { MercadoPagoConfig, Preference } from "mercadopago";
-import fetch from "node-fetch"; // 🟢 agregado para consultar el pago
+import fetch from "node-fetch";
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 🔐 Inicializar SDK de Mercado Pago
+// 🔐 Inicializar SDK Mercado Pago
 const client = new MercadoPagoConfig({
   accessToken: process.env.MERCADO_PAGO_ACCESS_TOKEN,
   options: { timeout: 40000 },
@@ -24,7 +24,7 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(
   cors({
-    origin: [process.env.URL_FRONT || "http://localhost:5173"], // Ajustá al dominio real del front
+    origin: [process.env.URL_FRONT || "http://localhost:5173"],
   })
 );
 
@@ -33,7 +33,7 @@ app.get("/", (req, res) => {
   res.send("✅ Servidor de pagos Mercado Pago funcionando");
 });
 
-// 💰 Crear preferencia de pago
+// 💰 Crear preferencia
 app.post("/create_preference", async (req, res) => {
   try {
     const { mp } = req.body;
@@ -42,7 +42,6 @@ app.post("/create_preference", async (req, res) => {
       return res.status(400).json({ error: "No se recibieron productos válidos." });
     }
 
-    // Armar la preferencia
     const preferenceBody = {
       items: mp.map((item) => ({
         id: item.id,
@@ -57,6 +56,7 @@ app.post("/create_preference", async (req, res) => {
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
+      notification_url: `${process.env.URL_PAYMENTS || "https://tu-servidor.com"}/orden`, // 👈 webhook oficial
     };
 
     const result = await preference.create({ body: preferenceBody });
@@ -70,21 +70,20 @@ app.post("/create_preference", async (req, res) => {
 });
 
 
-// 🟢🟢🟢🟢🟢  AGREGADO: LÓGICA DE WEBHOOK Y CONTROL DE ESTADO 🟢🟢🟢🟢🟢
-
-// Variable temporal (sin base de datos)
+// 🟢 Estado temporal
 let pagoExitoso = false;
 
-// ✅ Webhook que Mercado Pago llama automáticamente después del pago
-app.post("/webhook", async (req, res) => {
+// ✅ Mercado Pago llama a esta ruta automáticamente
+app.post("/orden", async (req, res) => {
   try {
     const data = req.body;
 
-    // Solo actuamos si el webhook es del tipo "payment"
+    // 🧾 Solo actuamos si es de tipo "payment"
     if (data.type === "payment" && data.data && data.data.id) {
       const paymentId = data.data.id;
+      console.log("📩 Webhook /orden recibido con paymentId:", paymentId);
 
-      // Consultar los detalles del pago en la API de MP
+      // Consultar a Mercado Pago
       const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: {
           Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
@@ -92,9 +91,8 @@ app.post("/webhook", async (req, res) => {
       });
 
       const pago = await response.json();
-      console.log("🧾 Estado del pago recibido:", pago.status);
+      console.log("🧾 Estado del pago:", pago.status);
 
-      // Si está aprobado, activamos la bandera
       if (pago.status === "approved") {
         pagoExitoso = true;
         console.log("✅ Pago aprobado — listo para desbloquear cuentos");
@@ -103,22 +101,20 @@ app.post("/webhook", async (req, res) => {
       }
     }
 
-    // Responder siempre 200 a Mercado Pago
     res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Error en webhook:", error);
+    console.error("❌ Error en webhook /orden:", error);
     res.sendStatus(500);
   }
 });
 
-// ✅ Endpoint que consulta el frontend cada pocos segundos
+// ✅ El front consulta este endpoint para saber si liberar los cuentos
 app.get("/webhook_estado", (req, res) => {
   res.json({ pago_exitoso: pagoExitoso });
 
-  // Reiniciar bandera para no dejar desbloqueado eternamente
+  // Reiniciamos la bandera después de informar al front
   if (pagoExitoso) pagoExitoso = false;
 });
-
 
 // 🚀 Iniciar servidor
 app.listen(port, () => {
