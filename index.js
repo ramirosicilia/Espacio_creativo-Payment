@@ -4,6 +4,7 @@ import cors from "cors";
 import dotenv from "dotenv";
 import morgan from "morgan";
 import { MercadoPagoConfig, Preference } from "mercadopago";
+import fetch from "node-fetch"; // 🟢 agregado para consultar el pago
 
 dotenv.config();
 
@@ -67,6 +68,57 @@ app.post("/create_preference", async (req, res) => {
     res.status(500).json({ error: "Error al crear la preferencia", detalle: error.message });
   }
 });
+
+
+// 🟢🟢🟢🟢🟢  AGREGADO: LÓGICA DE WEBHOOK Y CONTROL DE ESTADO 🟢🟢🟢🟢🟢
+
+// Variable temporal (sin base de datos)
+let pagoExitoso = false;
+
+// ✅ Webhook que Mercado Pago llama automáticamente después del pago
+app.post("/webhook", async (req, res) => {
+  try {
+    const data = req.body;
+
+    // Solo actuamos si el webhook es del tipo "payment"
+    if (data.type === "payment" && data.data && data.data.id) {
+      const paymentId = data.data.id;
+
+      // Consultar los detalles del pago en la API de MP
+      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+        headers: {
+          Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
+        },
+      });
+
+      const pago = await response.json();
+      console.log("🧾 Estado del pago recibido:", pago.status);
+
+      // Si está aprobado, activamos la bandera
+      if (pago.status === "approved") {
+        pagoExitoso = true;
+        console.log("✅ Pago aprobado — listo para desbloquear cuentos");
+      } else {
+        console.log("⚠️ Pago no aprobado:", pago.status);
+      }
+    }
+
+    // Responder siempre 200 a Mercado Pago
+    res.sendStatus(200);
+  } catch (error) {
+    console.error("❌ Error en webhook:", error);
+    res.sendStatus(500);
+  }
+});
+
+// ✅ Endpoint que consulta el frontend cada pocos segundos
+app.get("/webhook_estado", (req, res) => {
+  res.json({ pago_exitoso: pagoExitoso });
+
+  // Reiniciar bandera para no dejar desbloqueado eternamente
+  if (pagoExitoso) pagoExitoso = false;
+});
+
 
 // 🚀 Iniciar servidor
 app.listen(port, () => {
