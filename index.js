@@ -71,7 +71,8 @@ app.post("/create_preference", async (req, res) => {
 
 
 // 🟢 Estado temporal
-let pagoExitoso = false;
+const pagosExitosos = new Set(); // guarda IDs de productos pagados
+
 
 // ✅ Mercado Pago llama a esta ruta automáticamente
 app.post("/orden", async (req, res) => {
@@ -94,8 +95,13 @@ app.post("/orden", async (req, res) => {
       console.log("🧾 Estado del pago:", pago.status);
 
       if (pago.status === "approved") {
-        pagoExitoso = true;
-        console.log("✅ Pago aprobado — listo para desbloquear cuentos");
+        // 🟢 Guarda qué producto fue pagado
+        const items = pago.additional_info?.items || [];
+        items.forEach((item) => {
+          if (item.id) pagosExitosos.add(item.id.toString());
+        });
+
+        console.log("✅ Pago aprobado — productos liberados:", [...pagosExitosos]);
       } else {
         console.log("⚠️ Pago no aprobado:", pago.status);
       }
@@ -110,12 +116,13 @@ app.post("/orden", async (req, res) => {
 
 // ✅ El front consulta este endpoint para saber si liberar los cuentos
 app.get("/webhook_estado", (req, res) => {
-  res.json({ pago_exitoso: pagoExitoso });
+  const { libroId } = req.query;
+  const pagado = pagosExitosos.has(libroId);
 
-  // Reiniciamos la bandera después de informar al front
-  if (pagoExitoso) pagoExitoso = false;
+  res.json({ pago_exitoso: pagado });
+
+  if (pagado) pagosExitosos.delete(libroId); // limpiar para evitar respuestas duplicadas
 });
-
 // 🚀 Iniciar servidor
 app.listen(port, () => {
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`);
