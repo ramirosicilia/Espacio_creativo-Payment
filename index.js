@@ -24,9 +24,15 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(
   cors({
-    origin: [process.env.URL_FRONT || "http://localhost:5173"],
+    origin: [
+      "https://espacio-creativo-front.onrender.com", // ✅ frontend en producción
+      "http://localhost:5173",                       // ✅ para desarrollo local
+    ],
+    methods: ["GET", "POST"],
+    allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
+
 
 // 🏠 Ruta base
 app.get("/", (req, res) => {
