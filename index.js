@@ -5,7 +5,6 @@ import dotenv from "dotenv";
 import morgan from "morgan";
 import { MercadoPagoConfig, Preference } from "mercadopago";
 import fetch from "node-fetch";
-import fs from "fs";
 
 dotenv.config();
 
@@ -26,18 +25,13 @@ app.use(express.json());
 app.use(
   cors({
     origin: [
-      process.env.URL_FRONT,
-      process.env.URL_PAYMENTS,
-      "http://localhost:5173",
+       process.env.URL_FRONT,
+       process.env.URL_PAYMENTS,
     ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
-); 
-
-app.use(express.text({ type: '*/*' }));
-app.use(express.urlencoded({ extended: true }));
-
+);
 
 // 🏠 Ruta base
 app.get("/", (req, res) => {
@@ -60,19 +54,17 @@ app.post("/create_preference", async (req, res) => {
         quantity: Number(item.quantity) || 1,
         unit_price: Number(item.unit_price),
         currency_id: "ARS",
-        })),
-        metadata: {
-    libroId: String(mp[0].id),
-  },
-
+      })),
+      metadata: {
+        libroId: mp[0].id, // ✅ Guardamos para el webhook
+      },
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
-     notification_url: `${process.env.URL_PAYMENTS}/orden`,
-
+      notification_url: `${process.env.URL_PAYMENTS || "https://tu-servidor.com"}/orden`,
     };
 
     const result = await preference.create({ body: preferenceBody });
@@ -91,11 +83,9 @@ const pagosExitosos = new Set();
 // ✅ Webhook Mercado Pago
 app.post("/orden", async (req, res) => {
   try {
-    const { type, action, data } = req.body;
-
-    // ✅ Nuevo chequeo: se ejecuta solo cuando el webhook corresponde a un pago y la acción es creación o actualización
-    if (type !== "payment" || !["payment.created", "payment.updated"].includes(action) || !data?.id) {
-      console.warn(`⚠️ Webhook ignorado: type=${type}, action=${action}`);
+    const { type, data } = req.body;
+    if (type !== "payment" || !data?.id) {
+      console.warn(`⚠️ Webhook ignorado: type=${type}`);
       return res.sendStatus(200);
     }
 
@@ -156,9 +146,6 @@ app.post("/orden", async (req, res) => {
 app.get("/webhook_estado", (req, res) => {
   const { libroId } = req.query;
   if (!libroId) return res.status(400).json({ error: "Falta libroId" });
-
-  console.log("🧩 Metadata recibida:", pago.metadata);
-
 
   const pagoConfirmado = pagosExitosos.has(libroId.toString());
   console.log("Consulta estado pago:", libroId, "->", pagoConfirmado);
