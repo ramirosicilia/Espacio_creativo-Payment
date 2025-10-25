@@ -55,10 +55,11 @@ app.post("/create_preference", async (req, res) => {
         quantity: Number(item.quantity) || 1,
         unit_price: Number(item.unit_price),
         currency_id: "ARS",
-      })),
-      metadata: {
-        libroId: mp[0].id, // ✅ Guardamos para el webhook
-      },
+        })),
+        metadata: {
+    libroId: String(mp[0].id),
+  },
+
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
