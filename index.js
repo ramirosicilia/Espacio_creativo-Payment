@@ -25,7 +25,8 @@ app.use(express.json());
 app.use(
   cors({
     origin: [
-      "https://espacio-creativo-front.onrender.com",
+      process.env.URL_FRONT,
+      process.env.URL_PAYMENTS,
       "http://localhost:5173",
     ],
     methods: ["GET", "POST"],
@@ -83,9 +84,11 @@ const pagosExitosos = new Set();
 // ✅ Webhook Mercado Pago
 app.post("/orden", async (req, res) => {
   try {
-    const { type, data } = req.body;
-    if (type !== "payment" || !data?.id) {
-      console.warn(`⚠️ Webhook ignorado: type=${type}`);
+    const { type, action, data } = req.body;
+
+    // ✅ Nuevo chequeo: se ejecuta solo cuando el webhook corresponde a un pago y la acción es creación o actualización
+    if (type !== "payment" || !["payment.created", "payment.updated"].includes(action) || !data?.id) {
+      console.warn(`⚠️ Webhook ignorado: type=${type}, action=${action}`);
       return res.sendStatus(200);
     }
 
