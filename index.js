@@ -33,7 +33,11 @@ app.use(
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
-);
+); 
+
+app.use(express.text({ type: '*/*' }));
+app.use(express.urlencoded({ extended: true }));
+
 
 // 🏠 Ruta base
 app.get("/", (req, res) => {
@@ -67,7 +71,7 @@ app.post("/create_preference", async (req, res) => {
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
-     notification_url: `${process.env.URL_PAYMENTS || ''}/orden`,
+     notification_url: `${process.env.URL_PAYMENTS}/orden`,
 
     };
 
@@ -152,6 +156,9 @@ app.post("/orden", async (req, res) => {
 app.get("/webhook_estado", (req, res) => {
   const { libroId } = req.query;
   if (!libroId) return res.status(400).json({ error: "Falta libroId" });
+
+  console.log("🧩 Metadata recibida:", pago.metadata);
+
 
   const pagoConfirmado = pagosExitosos.has(libroId.toString());
   console.log("Consulta estado pago:", libroId, "->", pagoConfirmado);
