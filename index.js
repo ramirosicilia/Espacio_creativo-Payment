@@ -77,20 +77,22 @@ app.post("/create_preference", async (req, res) => {
 
 
 // 🟢 Estado temporal
-const pagosExitosos = new Set(); // guarda IDs de productos pagados
+
 
 
 // ✅ Mercado Pago llama a esta ruta automáticamente
+const pagosExitosos = new Set();
+
 app.post("/orden", async (req, res) => {
   try {
+    console.log("🔔 Webhook recibido:", req.body);
+
     const data = req.body;
 
-    // 🧾 Solo actuamos si es de tipo "payment"
-    if (data.type === "payment" && data.data && data.data.id) {
+    if (data.type === "payment" && data.data?.id) {
       const paymentId = data.data.id;
-      console.log("📩 Webhook /orden recibido con paymentId:", paymentId);
+      console.log("📩 Pago ID recibido:", paymentId);
 
-      // Consultar a Mercado Pago
       const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: {
           Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
@@ -101,15 +103,10 @@ app.post("/orden", async (req, res) => {
       console.log("🧾 Estado del pago:", pago.status);
 
       if (pago.status === "approved") {
-        // 🟢 Guarda qué producto fue pagado
         const items = pago.additional_info?.items || [];
-        items.forEach((item) => {
-          if (item.id) pagosExitosos.add(item.id.toString());
-        });
+        items.forEach((item) => pagosExitosos.add(item.id.toString()));
 
-        console.log("✅ Pago aprobado — productos liberados:", [...pagosExitosos]);
-      } else {
-        console.log("⚠️ Pago no aprobado:", pago.status);
+        console.log("✅ Pagos exitosos:", [...pagosExitosos]);
       }
     }
 
@@ -120,23 +117,16 @@ app.post("/orden", async (req, res) => {
   }
 });
 
-// ✅ El front consulta este endpoint para saber si liberar los cuentos
-app.get("/webhook_estado", async (req, res) => {
-  try {
-    const { libroId } = req.query;
+// ✅ Consulta real
+app.get("/webhook_estado", (req, res) => {
+  const { libroId } = req.query;
 
-    if (!libroId) {
-      return res.status(400).json({ error: "Falta el libroId" });
-    }
+  if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
-    // Ejemplo: consulta o simulación de pagos realizados
-    const pagoConfirmado = true; // ⚠️ Cambialo por la lógica real que uses (base de datos o memoria)
+  const pagoConfirmado = pagosExitosos.has(libroId.toString());
+  console.log("Consulta estado pago:", libroId, "->", pagoConfirmado);
 
-    res.json({ pago_exitoso: pagoConfirmado });
-  } catch (error) {
-    console.error("Error en webhook_estado:", error);
-    res.status(500).json({ error: "Error interno del servidor" });
-  }
+  res.json({ pago_exitoso: pagoConfirmado });
 });
 
 
