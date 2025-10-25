@@ -126,7 +126,8 @@ app.post("/orden", async (req, res) => {
 
     // 3️⃣ Registrar pago aprobado
     if (pago.status === "approved") {
-      const libroId = pago.metadata?.libroId;
+      const libroId = pago.metadata?.libroId; 
+        console.log("✅ Libro pagado registrado:", pago.metadata);
       if (libroId) {
         pagosExitosos.add(libroId.toString());
         console.log("✅ Libro pagado registrado:", libroId);
