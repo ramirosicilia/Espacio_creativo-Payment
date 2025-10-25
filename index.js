@@ -140,27 +140,6 @@ app.get("/webhook_estado", async (req, res) => {
 });
 
 
-    // 🔍 Consultar a Mercado Pago directamente
-    const resp = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
-      },
-    });
-
-    const pago = await resp.json();
-
-    if (pago.status === "approved") {
-      console.log(`✅ Pago aprobado para el libro ${libroId}`);
-      return res.json({ pago_exitoso: true });
-    }
-
-    res.json({ pago_exitoso: false, estado: pago.status });
-  } catch (error) {
-    console.error("❌ Error verificando pago:", error);
-    res.status(500).json({ error: "Error verificando pago" });
-  }
-});
-
 // 🚀 Iniciar servidor
 app.listen(port, () => {
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`);
