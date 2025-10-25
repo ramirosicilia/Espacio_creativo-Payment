@@ -25,14 +25,13 @@ app.use(express.json());
 app.use(
   cors({
     origin: [
-      "https://espacio-creativo-front.onrender.com", // ✅ frontend en producción
-      "http://localhost:5173",                       // ✅ para desarrollo local
+      "https://espacio-creativo-front.onrender.com",
+      "http://localhost:5173",
     ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
-
 
 // 🏠 Ruta base
 app.get("/", (req, res) => {
@@ -57,15 +56,15 @@ app.post("/create_preference", async (req, res) => {
         currency_id: "ARS",
       })),
       metadata: {
-     libroId: mp[0].id, // ✅ lo guardamos para el webhook
-    },
+        libroId: mp[0].id, // ✅ Guardamos para el webhook
+      },
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
-      notification_url: `${process.env.URL_PAYMENTS || "https://tu-servidor.com"}/orden`, // 👈 webhook oficial
+      notification_url: `${process.env.URL_PAYMENTS || "https://tu-servidor.com"}/orden`,
     };
 
     const result = await preference.create({ body: preferenceBody });
@@ -78,46 +77,56 @@ app.post("/create_preference", async (req, res) => {
   }
 });
 
-
-// 🟢 Estado temporal
-
-
-
-// ✅ Mercado Pago llama a esta ruta automáticamente
+// 🟢 Pagos exitosos
 const pagosExitosos = new Set();
 
+// ✅ Webhook Mercado Pago
 app.post("/orden", async (req, res) => {
   try {
-    console.log("🔔 Webhook recibido:", req.body);
-
-    const data = req.body;
-
-    if (data.type !== "payment" || !data.data?.id) {
-      console.warn(`⚠️ Webhook ignorado: type=${data.type}`);
+    const { type, data } = req.body;
+    if (type !== "payment" || !data?.id) {
+      console.warn(`⚠️ Webhook ignorado: type=${type}`);
       return res.sendStatus(200);
     }
 
-    const paymentId = data.data.id;
+    const paymentId = data.id;
     console.log("📩 Pago ID recibido:", paymentId);
 
-    const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      headers: {
-        Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
-      },
+    // 1️⃣ Obtener el pago completo
+    const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
     });
 
-    if (!response.ok) {
-      const errorText = await response.text();
+    if (!pagoResponse.ok) {
+      const errorText = await pagoResponse.text();
       console.error("❌ Error consultando pago:", errorText);
       return res.sendStatus(500);
     }
 
-    const pago = await response.json();
+    const pago = await pagoResponse.json();
     console.log("🧾 Estado del pago:", pago.status);
 
+    // 2️⃣ Obtener external_reference si hace falta
+    let externalReference = pago.external_reference;
+    if (!externalReference && pago.order?.id) {
+      const orderResponse = await fetch(`https://api.mercadopago.com/merchant_orders/${pago.order.id}`, {
+        headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+      });
+
+      if (orderResponse.ok) {
+        const ordenData = await orderResponse.json();
+        externalReference = ordenData.external_reference;
+      }
+    }
+
+    if (!externalReference) {
+      console.error("❌ No se pudo obtener external_reference");
+      return res.status(400).json({ error: "Falta external_reference" });
+    }
+
+    // 3️⃣ Registrar pago aprobado
     if (pago.status === "approved") {
       const libroId = pago.metadata?.libroId;
-
       if (libroId) {
         pagosExitosos.add(libroId.toString());
         console.log("✅ Libro pagado registrado:", libroId);
@@ -133,11 +142,9 @@ app.post("/orden", async (req, res) => {
   }
 });
 
-
-// ✅ Consulta real
+// ✅ Consulta rápida de pagos
 app.get("/webhook_estado", (req, res) => {
   const { libroId } = req.query;
-
   if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
   const pagoConfirmado = pagosExitosos.has(libroId.toString());
@@ -145,7 +152,6 @@ app.get("/webhook_estado", (req, res) => {
 
   res.json({ pago_exitoso: pagoConfirmado });
 });
-
 
 // 🚀 Iniciar servidor
 app.listen(port, () => {
