@@ -85,32 +85,6 @@ app.post("/create_preference", async (req, res) => {
 const pagosExitosos = new Set();
 
 // ✅ Webhook Mercado Pago
-let pagosExitosos = new Set();
-const archivoPagos = "./pagos.json";
-
-if (fs.existsSync(archivoPagos)) {
-  try {
-    const data = JSON.parse(fs.readFileSync(archivoPagos, "utf8"));
-    pagosExitosos = new Set(data);
-    console.log("📂 Pagos cargados desde archivo:", [...pagosExitosos]);
-  } catch (err) {
-    console.error("⚠️ Error leyendo pagos.json:", err);
-  }
-}
-
-// 🟢 Guardar pagos en archivo
-function guardarPagos() {
-  try {
-    fs.writeFileSync(archivoPagos, JSON.stringify([...pagosExitosos], null, 2));
-    console.log("💾 Pagos guardados en archivo");
-  } catch (err) {
-    console.error("❌ Error guardando pagos:", err);
-  }
-}
-
-
-// 🔽 🔽 🔽  A partir de acá va tu código exactamente igual 🔽 🔽 🔽
-
 app.post("/orden", async (req, res) => {
   try {
     const { type, action, data } = req.body;
@@ -161,7 +135,6 @@ app.post("/orden", async (req, res) => {
       const libroId = pago.metadata?.libroId;
       if (libroId) {
         pagosExitosos.add(libroId.toString());
-        guardarPagos(); // 🟢 guardamos en archivo persistente
         console.log("✅ Libro pagado registrado:", libroId);
       } else {
         console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
