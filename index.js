@@ -64,7 +64,7 @@ app.post("/create_preference", async (req, res) => {
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
-      notification_url: `${process.env.URL_PAYMENTS || "https://tu-servidor.com"}/orden`,
+      notification_url: `${process.env.URL_PAYMENTS}/orden`,
     };
 
     const result = await preference.create({ body: preferenceBody });
@@ -145,7 +145,11 @@ app.post("/orden", async (req, res) => {
 // ✅ Consulta rápida de pagos
 app.get("/webhook_estado", (req, res) => {
   const { libroId } = req.query;
-  if (!libroId) return res.status(400).json({ error: "Falta libroId" });
+
+  console.log(libroId)
+  if (!libroId) return res.status(400).json({ error: "Falta libroId" }); 
+
+  console.log(libroId,"libro")
 
   const pagoConfirmado = pagosExitosos.has(libroId.toString());
   console.log("Consulta estado pago:", libroId, "->", pagoConfirmado);
