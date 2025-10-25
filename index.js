@@ -123,11 +123,22 @@ app.post("/orden", async (req, res) => {
 // ✅ El front consulta este endpoint para saber si liberar los cuentos
 app.get("/webhook_estado", async (req, res) => {
   try {
-    const { libroId, paymentId } = req.query;
+    const { libroId } = req.query;
 
-    if (!paymentId) {
-      return res.status(400).json({ error: "Falta el paymentId" });
+    if (!libroId) {
+      return res.status(400).json({ error: "Falta el libroId" });
     }
+
+    // Ejemplo: consulta o simulación de pagos realizados
+    const pagoConfirmado = true; // ⚠️ Cambialo por la lógica real que uses (base de datos o memoria)
+
+    res.json({ pago_exitoso: pagoConfirmado });
+  } catch (error) {
+    console.error("Error en webhook_estado:", error);
+    res.status(500).json({ error: "Error interno del servidor" });
+  }
+});
+
 
     // 🔍 Consultar a Mercado Pago directamente
     const resp = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
