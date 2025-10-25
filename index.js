@@ -56,6 +56,9 @@ app.post("/create_preference", async (req, res) => {
         unit_price: Number(item.unit_price),
         currency_id: "ARS",
       })),
+      metadata: {
+     libroId: mp[0].id, // ✅ lo guardamos para el webhook
+    },
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
@@ -103,11 +106,17 @@ app.post("/orden", async (req, res) => {
       console.log("🧾 Estado del pago:", pago.status);
 
       if (pago.status === "approved") {
-        const items = pago.additional_info?.items || [];
-        items.forEach((item) => pagosExitosos.add(item.id.toString()));
+  const libroId = pago.metadata?.libroId;
 
-        console.log("✅ Pagos exitosos:", [...pagosExitosos]);
-      }
+  if (libroId) {
+    pagosExitosos.add(libroId.toString());
+    console.log("✅ Libro pagado registrado:", libroId);
+    console.log("📌 Pagos confirmados:", [...pagosExitosos]);
+  } else {
+    console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
+  }
+}
+
     }
 
     res.sendStatus(200);
