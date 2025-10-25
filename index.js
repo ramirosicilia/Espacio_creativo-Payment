@@ -92,31 +92,38 @@ app.post("/orden", async (req, res) => {
 
     const data = req.body;
 
-    if (data.type === "payment" && data.data?.id) {
-      const paymentId = data.data.id;
-      console.log("📩 Pago ID recibido:", paymentId);
+    if (data.type !== "payment" || !data.data?.id) {
+      console.warn(`⚠️ Webhook ignorado: type=${data.type}`);
+      return res.sendStatus(200);
+    }
 
-      const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-        headers: {
-          Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
-        },
-      });
+    const paymentId = data.data.id;
+    console.log("📩 Pago ID recibido:", paymentId);
 
-      const pago = await response.json();
-      console.log("🧾 Estado del pago:", pago.status);
+    const response = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+      headers: {
+        Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
+      },
+    });
 
-      if (pago.status === "approved") {
-  const libroId = pago.metadata?.libroId;
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error("❌ Error consultando pago:", errorText);
+      return res.sendStatus(500);
+    }
 
-  if (libroId) {
-    pagosExitosos.add(libroId.toString());
-    console.log("✅ Libro pagado registrado:", libroId);
-    console.log("📌 Pagos confirmados:", [...pagosExitosos]);
-  } else {
-    console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
-  }
-}
+    const pago = await response.json();
+    console.log("🧾 Estado del pago:", pago.status);
 
+    if (pago.status === "approved") {
+      const libroId = pago.metadata?.libroId;
+
+      if (libroId) {
+        pagosExitosos.add(libroId.toString());
+        console.log("✅ Libro pagado registrado:", libroId);
+      } else {
+        console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
+      }
     }
 
     res.sendStatus(200);
@@ -125,6 +132,7 @@ app.post("/orden", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // ✅ Consulta real
 app.get("/webhook_estado", (req, res) => {
