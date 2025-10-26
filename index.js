@@ -143,20 +143,22 @@ app.post("/orden", async (req, res) => {
       return res.status(400).json({ error: "Falta external_reference" });
     }
 
-    // 3️⃣ Registrar pago aprobado
-    if (pago.status === "approved") {
-      const libroId = pago.metadata?.libroId 
-        ?? pago.metadata?.libro_id  
-        ?? pago.additional_info?.items?.[0]?.id;
-      console.log("🔹 Metadata del pago:", pago.metadata);
+    // 📦 Detectar correctamente el ID del libro comprado
+let libroId =
+  pago.metadata?.libro_id ||
+  pago.metadata?.libroId ||
+  pago.external_reference ||
+  pago.additional_info?.items?.[0]?.id;
 
-      if (libroId) {
-        pagosExitosos.add(libroId.toString());
-        console.log("✅ Libro pagado registrado:", libroId);
-      } else {
-        console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
-      }
-    }
+console.log("🔹 ID detectado del libro:", libroId);
+
+if (pago.status === "approved" && libroId) {
+  pagosExitosos.add(libroId.toString());
+  console.log("✅ Libro pagado registrado:", libroId);
+} else {
+  console.warn("⚠️ Pago aprobado pero sin libroId:", pago.metadata);
+}
+
 
     res.sendStatus(200);
   } catch (error) {
