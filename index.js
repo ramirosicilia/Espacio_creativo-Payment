@@ -144,21 +144,19 @@ app.post("/orden", async (req, res) => {
     }
 
     // 3️⃣ Registrar pago aprobado
-    // 3️⃣ Registrar pago aprobado
-if (pago.status === "approved") {
-  const libroId = pago.metadata?.libroId 
-    ?? pago.metadata?.libro_id  // 👈 agregado
-    ?? pago.additional_info?.items?.[0]?.id;
-  console.log("🔹 Metadata del pago:", pago.metadata);
+    if (pago.status === "approved") {
+      const libroId = pago.metadata?.libroId 
+        ?? pago.metadata?.libro_id  
+        ?? pago.additional_info?.items?.[0]?.id;
+      console.log("🔹 Metadata del pago:", pago.metadata);
 
-  if (libroId) {
-    pagosExitosos.add(libroId.toString());
-    console.log("✅ Libro pagado registrado:", libroId);
-  } else {
-    console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
-  }
-}
-
+      if (libroId) {
+        pagosExitosos.add(libroId.toString());
+        console.log("✅ Libro pagado registrado:", libroId);
+      } else {
+        console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
+      }
+    }
 
     res.sendStatus(200);
   } catch (error) {
@@ -179,6 +177,14 @@ app.get("/webhook_estado", (req, res) => {
   console.log("🔹 Consulta estado pago:", libroId, "->", pagoConfirmado);
 
   res.json({ pago_exitoso: pagoConfirmado });
+});
+
+// 🟢 agregado: endpoint de prueba manual (para frontend)
+app.get("/force_unlock/:libroId", (req, res) => {
+  const { libroId } = req.params;
+  pagosExitosos.add(libroId.toString());
+  console.log("🟢 Pago forzado manualmente como exitoso:", libroId);
+  res.json({ ok: true, libroId });
 });
 
 // 🚀 Iniciar servidor
