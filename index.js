@@ -69,14 +69,14 @@ app.post("/create_preference", async (req, res) => {
     pending: process.env.URL_FRONT,
   },
   auto_return: "approved",
-  notification_url: `${process.env.URL_PAYMENTS}/orden`,
+  notification_url: process.env.URL_PAYMENTS,
 };
 
 
     const result = await preference.create({ body: preferenceBody });
     console.log("🟢 Preferencia creada:", result.id);
 
-    res.json({ id: result.id });
+    res.json({ id: result.id }); 
   } catch (error) {
     console.error("❌ Error al crear preferencia:", error.message);
     res.status(500).json({ error: "Error al crear la preferencia", detalle: error.message });
