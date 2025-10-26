@@ -145,30 +145,9 @@ app.post("/orden", async (req, res) => {
 
     // 3️⃣ Registrar pago aprobado
     if (pago.status === "approved") {
-     let libroId = pago.metadata?.libroId 
-  ?? pago.metadata?.libro_id 
-  ?? pago.external_reference 
-  ?? pago.additional_info?.items?.[0]?.id;
-
-if (!libroId && pago.order?.id) {
-  // Si aún no lo tenemos, buscamos desde merchant_orders
-  const orderResponse = await fetch(
-    `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-    { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-  );
-  if (orderResponse.ok) {
-    const ordenData = await orderResponse.json();
-    libroId = ordenData.external_reference;
-  }
-}
-
-if (pago.status === "approved" && libroId) {
-  pagosExitosos.add(libroId.toString());
-  console.log("✅ Pago confirmado para libroId:", libroId);
-} else {
-  console.warn("⚠️ No se pudo obtener libroId o el pago no está aprobado:", libroId, pago.status);
-}
-
+      const libroId = pago.metadata?.libroId 
+        ?? pago.metadata?.libro_id  
+        ?? pago.additional_info?.items?.[0]?.id;
       console.log("🔹 Metadata del pago:", pago.metadata);
 
       if (libroId) {
