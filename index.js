@@ -64,9 +64,7 @@ app.post("/create_preference", async (req, res) => {
 },
 
   external_reference: mp[0].id.toString(), // Identificador único
- notification_url: process.env.URL_PAYMENTS 
-    ? `${process.env.URL_PAYMENTS}/orden` 
-    : "http://localhost:10000/orden", // Para el webhook
+ notification_url: process.env.URL_PAYMENTS, 
   back_urls: {
     success: process.env.URL_FRONT,
     failure: process.env.URL_FRONT,
