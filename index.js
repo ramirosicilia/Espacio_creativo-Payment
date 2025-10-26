@@ -70,7 +70,7 @@ app.post("/create_preference", async (req, res) => {
     pending: process.env.URL_FRONT,
   },
   auto_return: "approved",        // Redirige automáticamente si se aprueba
-  notification_url: `${process.env.URL_PAYMENTS}/orden`, // Para el webhook
+  notification_url: process.env.URL_PAYMENTS, // Para el webhook
 };
 
 
