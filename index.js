@@ -144,17 +144,21 @@ app.post("/orden", async (req, res) => {
     }
 
     // 3️⃣ Registrar pago aprobado
-    if (pago.status === "approved") {
-      const libroId = pago.metadata?.libroId ?? pago.additional_info?.items?.[0]?.id;
-      console.log("🔹 Metadata del pago:", pago.metadata);
+    // 3️⃣ Registrar pago aprobado
+if (pago.status === "approved") {
+  const libroId = pago.metadata?.libroId 
+    ?? pago.metadata?.libro_id  // 👈 agregado
+    ?? pago.additional_info?.items?.[0]?.id;
+  console.log("🔹 Metadata del pago:", pago.metadata);
 
-      if (libroId) {
-        pagosExitosos.add(libroId.toString());
-        console.log("✅ Libro pagado registrado:", libroId);
-      } else {
-        console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
-      }
-    }
+  if (libroId) {
+    pagosExitosos.add(libroId.toString());
+    console.log("✅ Libro pagado registrado:", libroId);
+  } else {
+    console.warn("⚠️ El pago fue aprobado pero no llegó metadata.libroId");
+  }
+}
+
 
     res.sendStatus(200);
   } catch (error) {
