@@ -53,23 +53,24 @@ app.post("/create_preference", async (req, res) => {
 
     const preferenceBody = {
   items: mp.map((item) => ({
-    id: item.id,
+    id: item.id,                  // Mantengo tu id original
     title: item.name,
     quantity: Number(item.quantity) || 1,
     unit_price: Number(item.unit_price),
-    currency_id: "ARS",
+    currency_id: "ARS",           // Mantengo explícitamente ARS
   })),
   metadata: {
-    libroId: mp[0].id,
-  },
-  external_reference: mp[0].id.toString(), // ✅ Aquí va
+  libroId: mp[0].id.toString(),
+},
+
+  external_reference: mp[0].id.toString(), // Identificador único
   back_urls: {
     success: process.env.URL_FRONT,
     failure: process.env.URL_FRONT,
     pending: process.env.URL_FRONT,
   },
-  auto_return: "approved",
-  notification_url: process.env.URL_PAYMENTS,
+  auto_return: "approved",        // Redirige automáticamente si se aprueba
+  notification_url: `${process.env.URL_PAYMENTS}/orden`, // Para el webhook
 };
 
 
