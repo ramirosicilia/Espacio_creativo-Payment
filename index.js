@@ -4,7 +4,8 @@ import cors from "cors";
 import dotenv from "dotenv";
 import morgan from "morgan";
 import { MercadoPagoConfig, Preference } from "mercadopago";
-import fetch from "node-fetch";
+
+
 
 dotenv.config();
 
@@ -27,6 +28,7 @@ app.use(
     origin: [
        process.env.URL_FRONT,
        process.env.URL_PAYMENTS,
+       "*"
     ],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
@@ -51,6 +53,7 @@ app.post("/create_preference", async (req, res) => {
       items: mp.map((item) => ({
         id: item.id,
         title: item.name,
+        external_reference: mp[0].id.toString(), // ✅
         quantity: Number(item.quantity) || 1,
         unit_price: Number(item.unit_price),
         currency_id: "ARS",
@@ -64,7 +67,7 @@ app.post("/create_preference", async (req, res) => {
         pending: process.env.URL_FRONT,
       },
       auto_return: "approved",
-      notification_url: `${process.env.URL_PAYMENTS}/orden`,
+      notification_url: process.env.URL_PAYMENTS,
     };
 
     const result = await preference.create({ body: preferenceBody });
