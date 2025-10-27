@@ -25,11 +25,11 @@ app.use(morgan("dev"));
 app.use(express.json());
 app.use(
   cors({
-    origin: [process.env.URL_FRONT, "*"],
-    methods: ["GET", "POST"],
-    allowedHeaders: ["Content-Type", "Authorization"],
+    origin: process.env.URL_FRONT,
+    credentials: true,
   })
 );
+
 
 // 🏠 Test
 app.get("/", (req, res) => res.send("✅ Backend MercadoPago + Supabase funcionando correctamente"));
