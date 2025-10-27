@@ -131,11 +131,10 @@ app.get("/webhook_estado", async (req, res) => {
     console.log("📘 Consultando libroId:", libroId);
 
 
-    const { data, error } = await supabase
+    const { data } = await supabase
       .from("pagos")
       .select("*")
-      .eq("libro_id", String(libroId))
-
+      .eq("libro_id",libroId)
       .eq("status","approved");
 
 
