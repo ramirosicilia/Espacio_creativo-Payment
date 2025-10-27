@@ -129,7 +129,7 @@ app.get("/webhook_estado", async (req, res) => {
   console.log("📘 Consultando libroId:", libroId, typeof libroId);
 
   let intentos = 0;
-  const maxIntentos = 10; // espera máx. 10 veces (~15s)
+  const maxIntentos = 20; // espera máx. 10 veces (~15s)
 
   try {
     while (intentos < maxIntentos) {
