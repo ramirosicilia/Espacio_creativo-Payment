@@ -125,35 +125,37 @@ app.post("/orden", async (req, res) => {
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
+  const libroId = req.query.libroId;
+  console.log("📘 Consultando libroId:", libroId, typeof libroId);
+
+  let intentos = 0;
+  const maxIntentos = 10; // espera máx. 10 veces (~15s)
+
   try {
-    const { libroId } = req.query;
-    if (!libroId) return res.status(400).json({ error: "Falta libroId" });
-    console.log("📘 Consultando libroId:", libroId);
+    while (intentos < maxIntentos) {
+      const { data, error } = await supabase
+        .from("pagos")
+        .select("*")
+        .eq("libro_id", +libroId)
+        .eq("status", "approved");
 
+      if (error) throw error;
 
-    const { data } = await supabase.from("pagos")
-      .select("*")
-      .eq("libro_id",libroId)
-      .eq("status","approved");
+      if (data && data.length > 0) {
+        console.log("✅ Pago encontrado:", data);
+        return res.json({ pago_exitoso: true, data });
+      }
 
-
-    console.log(data,"esta es la data")
-
-    if (data.length > 0) {
-      console.log("✅ Pago encontrado:", data[0]);
-      res.json({
-        pago_exitoso:true,
-        libro: data[0].libro_id,
-        monto: data[0].amount,
-        fecha: data[0].created_at,
-      });
-    } else {
-      console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
-      res.json({ pago_exitoso: false });
+      intentos++;
+      console.log(`⏳ Intento ${intentos}: no se encontró pago aún...`);
+      await new Promise((r) => setTimeout(r, 1500)); // espera 1.5 segundos
     }
+
+    console.warn("⚠️ No se detectó pago después de varios intentos.");
+    res.json({ pago_exitoso: false, data: [] });
   } catch (err) {
-    console.error("❌ Error al consultar Supabase:", err.message);
-    res.status(500).json({ error: "Error consultando estado del pago" });
+    console.error("❌ Error en /webhook_estado:", err);
+    res.status(500).json({ error: "Error al consultar el pago" });
   }
 });
 
