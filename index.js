@@ -128,11 +128,9 @@ app.get("/webhook_estado", async (req, res) => {
   try {
     const { libroId } = req.query;
     if (!libroId) return res.status(400).json({ error: "Falta libroId" });
+    console.log("📘 Consultando libroId:", libroId);
 
-    // 🔧 Convertir a número si es posible
-    const libroIdNumber = isNaN(libroId) ? libroId : Number(libroId);
-
-    console.log("📘 Consultando libroId:", libroIdNumber);
+    const libroIdNumber = Number(libroId);
 
     const { data, error } = await supabase
       .from("pagos")
@@ -159,6 +157,7 @@ app.get("/webhook_estado", async (req, res) => {
     res.status(500).json({ error: "Error consultando estado del pago" });
   }
 });
+
 
 
 app.listen(port, () =>
