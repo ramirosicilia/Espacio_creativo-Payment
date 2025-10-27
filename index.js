@@ -150,7 +150,7 @@ app.get("/webhook_estado", async (req, res) => {
         fecha: data[0].created_at,
       });
     } else {
-      console.log("⚠️ No se encontró pago aprobado para libroId:", libroIdNumber);
+      console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
       res.json({ pago_exitoso: false });
     }
   } catch (err) {
