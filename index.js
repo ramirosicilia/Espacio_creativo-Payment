@@ -129,15 +129,21 @@ app.get("/webhook_estado", async (req, res) => {
     const { libroId } = req.query;
     if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
+    // 🔧 Convertir a número si es posible
+    const libroIdNumber = isNaN(libroId) ? libroId : Number(libroId);
+
+    console.log("📘 Consultando libroId:", libroIdNumber);
+
     const { data, error } = await supabase
       .from("pagos")
       .select("*")
-      .eq("libro_id", libroId)
+      .eq("libro_id", libroIdNumber)
       .eq("status", "approved");
 
     if (error) throw error;
 
     if (data.length > 0) {
+      console.log("✅ Pago encontrado:", data[0]);
       res.json({
         pago_exitoso: true,
         libro: data[0].libro_id,
@@ -145,6 +151,7 @@ app.get("/webhook_estado", async (req, res) => {
         fecha: data[0].created_at,
       });
     } else {
+      console.log("⚠️ No se encontró pago aprobado para libroId:", libroIdNumber);
       res.json({ pago_exitoso: false });
     }
   } catch (err) {
@@ -152,6 +159,7 @@ app.get("/webhook_estado", async (req, res) => {
     res.status(500).json({ error: "Error consultando estado del pago" });
   }
 });
+
 
 app.listen(port, () =>
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`)
