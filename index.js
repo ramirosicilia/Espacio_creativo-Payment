@@ -130,7 +130,7 @@ app.get("/webhook_estado", async (req, res) => {
     if (!libroId) return res.status(400).json({ error: "Falta libroId" });
     console.log("📘 Consultando libroId:", libroId);
 
-    const libroIdNumber = Number(libroId);
+    const libroIdNumber = libroId;
 
     const { data, error } = await supabase
       .from("pagos")
