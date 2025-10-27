@@ -135,15 +135,16 @@ app.get("/webhook_estado", async (req, res) => {
     const { data, error } = await supabase
       .from("pagos")
       .select("*")
-      .eq("libro_id", libroIdNumber)
-      .eq("status", "approved");
+      .eq("libro_id",libroIdNumber)
+      .eq("status","approved");
 
-    if (error) throw error;
+
+    console.log(data,"esta es la data")
 
     if (data.length > 0) {
       console.log("✅ Pago encontrado:", data[0]);
       res.json({
-        pago_exitoso: true,
+        pago_exitoso:true,
         libro: data[0].libro_id,
         monto: data[0].amount,
         fecha: data[0].created_at,
