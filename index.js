@@ -5,43 +5,39 @@ import dotenv from "dotenv";
 import morgan from "morgan";
 import fetch from "node-fetch"; // ⚡ necesario si usas Node 18 o menor
 import { MercadoPagoConfig, Preference } from "mercadopago";
+import { supabase } from "./DB.js"; 
+
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 
-// 🟢 Inicializa Mercado Pago
-console.log("🔹 Inicializando Mercado Pago...");
+
 const client = new MercadoPagoConfig({
   accessToken: process.env.MERCADO_PAGO_ACCESS_TOKEN,
   options: { timeout: 40000 },
 });
 const preference = new Preference(client);
 
-// 🧩 Middlewares
+// Middlewares
 app.use(morgan("dev"));
 app.use(express.json());
 app.use(
   cors({
-    origin: [
-      process.env.URL_FRONT,
-      process.env.URL_PAYMENTS,
-      "*",
-    ],
+    origin: [process.env.URL_FRONT, "*"],
     methods: ["GET", "POST"],
     allowedHeaders: ["Content-Type", "Authorization"],
   })
 );
 
-// 🏠 Ruta base
-app.get("/", (req, res) => res.send("✅ Servidor de pagos Mercado Pago funcionando correctamente"));
+// 🏠 Test
+app.get("/", (req, res) => res.send("✅ Backend MercadoPago + Supabase funcionando correctamente"));
 
-// 💳 Crear preferencia
+// 💳 Crear preferencia de pago
 app.post("/create_preference", async (req, res) => {
   try {
     const { mp } = req.body;
-
     if (!mp || !Array.isArray(mp) || mp.length === 0)
       return res.status(400).json({ error: "No se recibieron productos válidos." });
 
@@ -55,7 +51,7 @@ app.post("/create_preference", async (req, res) => {
       })),
       metadata: { libroId: mp[0].id },
       external_reference: mp[0].id,
-      notification_url: process.env.URL_PAYMENTS,
+      notification_url: `${process.env.URL_BACK}/orden`, // Webhook
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
@@ -73,12 +69,10 @@ app.post("/create_preference", async (req, res) => {
   }
 });
 
-// 🧾 Webhook: recibe pagos aprobados
-const pagosExitosos = new Set();
-
+// 🧾 Webhook MercadoPago
 app.post("/orden", async (req, res) => {
   try {
-    console.log("📥 POST /orden recibido:", JSON.stringify(req.body, null, 2));
+    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
     const { type, data } = req.body;
 
     if (type !== "payment" || !data?.id) return res.sendStatus(200);
@@ -102,9 +96,23 @@ app.post("/orden", async (req, res) => {
         pago.external_reference ||
         pago.additional_info?.items?.[0]?.id;
 
-      if (libroId) {
-        pagosExitosos.add(libroId.toString());
-        console.log("✅ Libro pagado registrado:", libroId);
+      const amount = pago.transaction_amount || 0;
+
+      // 🟢 Guardar en Supabase
+      const { error: insertError } = await supabase.from("pagos").insert([
+        {
+          payment_id: paymentId,
+          libro_id: libroId,
+          status: pago.status,
+          amount: amount,
+          currency: pago.currency_id || "ARS",
+        },
+      ]);
+
+      if (insertError) {
+        console.error("❌ Error insertando en Supabase:", insertError.message);
+      } else {
+        console.log("✅ Pago guardado en Supabase correctamente.");
       }
     }
 
@@ -115,30 +123,34 @@ app.post("/orden", async (req, res) => {
   }
 });
 
-// 🔍 Consulta desde el frontend
-app.get("/webhook_estado", (req, res) => {
-  const { libroId } = req.query;
-  const pagoConfirmado = pagosExitosos.has(libroId?.toString());
-  res.json({ pago_exitoso: pagoConfirmado });
-});
+// 🔍 Consulta desde el front para desbloquear
+app.get("/webhook_estado", async (req, res) => {
+  try {
+    const { libroId } = req.query;
+    if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
-// 🔓 Endpoint manual para probar desbloqueo
-app.get("/force_unlock/:libroId", (req, res) => {
-  const { libroId } = req.params;
-  pagosExitosos.add(libroId.toString());
-  res.json({ ok: true, libroId });
-});
+    const { data, error } = await supabase
+      .from("pagos")
+      .select("*")
+      .eq("libro_id", libroId)
+      .eq("status", "approved");
 
-// 🧩 Endpoint para verificación directa (opcional)
-app.get("/verificar_pago", async (req, res) => {
-  const { libroId } = req.query;
-  const response = await fetch(
-    `https://api.mercadopago.com/v1/payments/search?external_reference=${libroId}`,
-    { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-  );
-  const data = await response.json();
-  const pagoAprobado = data.results.some((p) => p.status === "approved");
-  res.json({ pago_exitoso: pagoAprobado });
+    if (error) throw error;
+
+    if (data.length > 0) {
+      res.json({
+        pago_exitoso: true,
+        libro: data[0].libro_id,
+        monto: data[0].amount,
+        fecha: data[0].created_at,
+      });
+    } else {
+      res.json({ pago_exitoso: false });
+    }
+  } catch (err) {
+    console.error("❌ Error al consultar Supabase:", err.message);
+    res.status(500).json({ error: "Error consultando estado del pago" });
+  }
 });
 
 app.listen(port, () =>
