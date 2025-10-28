@@ -56,7 +56,7 @@ app.post("/create_preference", async (req, res) => {
     categoria: mp[0].categoria, // 👈 agregamos categoría para redirigir correctamente
   },
   external_reference: mp[0].id,
-  notification_url: process.env.URL_PAYMENTS, // 🟢 tu webhook /orden
+  notification_url:`${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
   back_urls: {
     success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
     failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
