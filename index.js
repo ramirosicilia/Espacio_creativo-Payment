@@ -76,7 +76,7 @@ app.post("/create_preference", async (req, res) => {
 });
 
 // 🧾 Webhook MercadoPago
-app.post("/orden", async (req, res) => {
+app.post("/order", async (req, res) => {
   try {
     console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
     const { type, data } = req.body;
