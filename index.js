@@ -42,23 +42,27 @@ app.post("/create_preference", async (req, res) => {
       return res.status(400).json({ error: "No se recibieron productos válidos." });
 
     const preferenceBody = {
-      items: mp.map((item) => ({
-        id: item.id,
-        title: item.name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        currency_id: "ARS",
-      })),
-      metadata: { libroId: mp[0].id },
-      external_reference: mp[0].id,
-      notification_url:process.env.URL_PAYMENTS,  // Webhook
-      back_urls: {
-        success: process.env.URL_FRONT,
-        failure: process.env.URL_FRONT,
-        pending: process.env.URL_FRONT,
-      },
-      auto_return: "approved",
-    };
+  items: mp.map((item) => ({
+    id: item.id,
+    title: item.name,
+    quantity: Number(item.quantity),
+    unit_price: Number(item.unit_price),
+    currency_id: "ARS",
+  })),
+  metadata: {
+    libroId: mp[0].id,
+    categoria: mp[0].categoria, // 👈 agregamos categoría para redirigir correctamente
+  },
+  external_reference: mp[0].id,
+  notification_url: process.env.URL_PAYMENTS, // 🟢 tu webhook /orden
+  back_urls: {
+    success: `${process.env.URL_FRONT}/capitulo/${mp[0].categoria}/${mp[0].id}`,
+    failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+    pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+  },
+  auto_return: "approved",
+};
+
 
     const result = await preference.create({ body: preferenceBody });
     console.log("🟢 Preferencia creada:", result.id);
