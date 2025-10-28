@@ -72,19 +72,25 @@ app.post("/create_preference", async (req, res) => {
 // 🧾 Webhook MercadoPago
 app.post("/orden", async (req, res) => {
   try {
-    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
+    // 📬 Responder rápido a Mercado Pago
+    res.sendStatus(200);
+
+    // Luego procesar el webhook de forma asíncrona
     const { type, data } = req.body;
 
-    if (type !== "payment" || !data?.id) return res.sendStatus(200);
+    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
+
+    if (type !== "payment" || !data?.id) return;
 
     const paymentId = data.id;
+
     const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
       headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
     });
 
     if (!pagoResponse.ok) {
       console.error("❌ Error al consultar pago:", await pagoResponse.text());
-      return res.sendStatus(500);
+      return;
     }
 
     const pago = await pagoResponse.json();
@@ -98,7 +104,6 @@ app.post("/orden", async (req, res) => {
 
       const amount = pago.transaction_amount || 0;
 
-      // 🟢 Guardar en Supabase
       const { error: insertError } = await supabase.from("pagos").insert([
         {
           payment_id: paymentId,
@@ -115,13 +120,11 @@ app.post("/orden", async (req, res) => {
         console.log("✅ Pago guardado en Supabase correctamente.");
       }
     }
-
-    res.sendStatus(200);
   } catch (error) {
     console.error("❌ Error procesando webhook:", error);
-    res.sendStatus(500);
   }
 });
+
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
