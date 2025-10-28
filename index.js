@@ -51,6 +51,7 @@ app.post("/create_preference", async (req, res) => {
       })),
       metadata: { libroId: mp[0].id },
       external_reference: mp[0].id,
+      notification_url:`${process.env.URL_BACK}/orden` ,  // Webhook
       back_urls: {
         success: process.env.URL_FRONT,
         failure: process.env.URL_FRONT,
