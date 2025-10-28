@@ -56,7 +56,7 @@ app.post("/create_preference", async (req, res) => {
   external_reference: mp[0].id,
   notification_url: process.env.URL_PAYMENTS, // 🟢 tu webhook /orden
   back_urls: {
-    success: `${process.env.URL_FRONT}/capitulo/${mp[0].categoria}/${mp[0].id}`,
+    success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
     failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
     pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
   },
