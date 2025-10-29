@@ -58,7 +58,7 @@ app.post("/create_preference", async (req, res) => {
   external_reference: mp[0].id,
   notification_url:`${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
   back_urls: {
-    success: `${process.env.URL_FRONT}/capitulo/${mp[0].categoria}/${mp[0].id}`,
+    success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
     failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
     pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
   },
@@ -78,118 +78,120 @@ app.post("/create_preference", async (req, res) => {
 // 🧾 Webhook MercadoPago
 app.post("/order", async (req, res) => {
   try {
-    console.log("==================📩 WEBHOOK /order RECIBIDO ==================");
+    console.log("==================📩 WEBHOOK /order ==================");
     console.log("➡️ BODY COMPLETO:", JSON.stringify(req.body, null, 2));
 
-    const { type, action, data } = req.body;
+    const { type, action, data, topic, resource } = req.body;
+
     console.log("📌 type:", type);
     console.log("📌 action:", action);
     console.log("📌 data:", data);
+    console.log("📌 topic:", topic);
+    console.log("📌 resource:", resource);
 
-    if (!data?.id) {
-      console.warn("⚠️ No hay data.id en el webhook");
-      return res.sendStatus(200);
-    }
+    let externalReference = null;
+    let amount = 0;
 
-    console.log("✅ ID del pago:", data.id);
+    // 🔹 Si llega un payment
+    if (topic === "payment" || type === "payment") {
+      const paymentId = data?.id || resource;
+      if (!paymentId) {
+        console.warn("⚠️ No hay paymentId");
+        return res.sendStatus(200);
+      }
 
-    // ✅ Validar type + action como en /orden
-    if (type !== "payment" || action !== "payment.created") {
-      console.warn(`⚠️ Webhook ignorado: type=${type} action=${action}`);
-      return res.sendStatus(200);
-    }
+      console.log("🔍 Consultando pago con ID:", paymentId);
 
-    const paymentId = data.id;
-    console.log("🔍 Consultando pago en MercadoPago con ID:", paymentId);
-
-    const pagoResponse = await fetch(
-      `https://api.mercadopago.com/v1/payments/${paymentId}`,
-      { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-    );
-
-    if (!pagoResponse.ok) {
-      console.error("❌ Error al consultar pago:", await pagoResponse.text());
-      return res.sendStatus(500);
-    }
-
-    const pago = await pagoResponse.json();
-    console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
-    console.log("🟣 Estado del pago:", pago.status);
-
-    if (pago.status !== "approved") {
-      console.log("⛔ Pago no aprobado → No se procesa");
-      return res.sendStatus(200);
-    }
-
-    console.log("✅ Pago APROBADO — seguimos con metadata y reference");
-
-    let externalReference =
-      pago.external_reference ||
-      pago.metadata?.libroId ||
-      pago.additional_info?.items?.[0]?.id;
-
-    console.log("📦 externalReference inicial:", externalReference);
-
-    // ✅ Si no viene — buscamos en merchant order
-    if (!externalReference && pago.order?.id) {
-      console.log("⚠️ No vino external_reference — consultando merchant_order…");
-      console.log("📌 ID order:", pago.order.id);
-
-      const orderResponse = await fetch(
-        `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+      const pagoResponse = await fetch(
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
         { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
       );
+
+      if (!pagoResponse.ok) {
+        console.error("❌ Error al consultar pago:", await pagoResponse.text());
+        return res.sendStatus(500);
+      }
+
+      const pago = await pagoResponse.json();
+      console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
+
+      if (pago.status !== "approved") {
+        console.log("⛔ Pago no aprobado → No se procesa");
+        return res.sendStatus(200);
+      }
+
+      console.log("✅ Pago aprobado");
+
+      externalReference = pago.external_reference || pago.metadata?.libroId;
+      amount = pago.transaction_amount || 0;
+
+      // 🔹 Si no viene externalReference, usamos merchant_order
+      if (!externalReference && pago.order?.id) {
+        console.log("⚠️ externalReference ausente, consultando merchant_order...");
+
+        const orderResponse = await fetch(
+          `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+          { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+        );
+
+        if (orderResponse.ok) {
+          const orderData = await orderResponse.json();
+          console.log("📦 merchant_order info:", JSON.stringify(orderData, null, 2));
+          externalReference = orderData.external_reference;
+        } else {
+          console.error("❌ Error consultando merchant_order");
+        }
+      }
+    }
+
+    // 🔹 Si llega un merchant_order directo
+    if (topic === "merchant_order") {
+      console.log("🔹 Webhook merchant_order directo");
+      const orderResponse = await fetch(resource, {
+        headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+      });
 
       if (orderResponse.ok) {
         const orderData = await orderResponse.json();
         console.log("📦 merchant_order info:", JSON.stringify(orderData, null, 2));
         externalReference = orderData.external_reference;
-        console.log("✅ externalReference recuperado:", externalReference);
+        amount = orderData.payments?.reduce((sum, p) => sum + p.transaction_amount, 0) || 0;
       } else {
-        console.error("❌ Error consultando merchant order");
+        console.error("❌ Error consultando merchant_order");
       }
     }
 
     if (!externalReference) {
-      console.error("❌ No se pudo obtener external_reference — Cancelando proceso");
+      console.error("❌ No se pudo obtener externalReference");
       return res.sendStatus(200);
     }
 
     console.log("🔎 externalReference FINAL:", externalReference);
+    console.log("💰 Monto:", amount);
 
-    const amount = pago.transaction_amount || 0;
-    console.log("💰 Monto del pago:", amount);
-
-    console.log("🗂 Insertando pago en Supabase…");
-
-    // ✅ Guardar pago en Supabase
-    const { error: insertError } = await supabase.from("pagos").insert([{
-      payment_id: paymentId,
+    // 🔹 Guardar o actualizar en Supabase
+    const { error: insertError } = await supabase.from("pagos").upsert([{
+      payment_id: data?.id || null,
       libro_id: externalReference,
-      status: pago.status,
+      status: "approved",
       amount,
-      currency: pago.currency_id || "ARS",
+      currency: "ARS",
     }]);
 
-    if (insertError) {
-      console.error("❌ Error insertando pago en Supabase:", insertError.message);
-    } else {
-      console.log("✅ Pago guardado en Supabase correctamente ✅");
-    }
+    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    else console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
-    console.log("✅ Proceso finalizado Webhook /order ✅");
+    console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
 
     return res.sendStatus(200);
 
   } catch (error) {
-    console.error("🔥 ERROR FATAL en webhook /order:", error);
+    console.error("🔥 ERROR en webhook /order:", error);
     console.log("===============================================================");
     res.sendStatus(500);
   }
 });
-
-
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
