@@ -77,57 +77,166 @@ app.post("/create_preference", async (req, res) => {
 
 // 🧾 Webhook MercadoPago
 app.post("/order", async (req, res) => {
+  const accessToken = process.env.MERCADO_PAGO_ACCESS_TOKEN;
+  const timestamp = new Date().toISOString();
+
   try {
-    console.log("📩 Webhook recibido:", JSON.stringify(req.body, null, 2));
-    const { type, data } = req.body;
+    console.log(`\n📩 [${timestamp}] --- Webhook recibido ---`);
+    console.log(JSON.stringify(req.body, null, 2));
 
-    if (type !== "payment" || !data?.id) return res.sendStatus(200);
+    const { type, action, data } = req.body;
 
-    const paymentId = data.id;
-    const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-      headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-    });
-
-    if (!pagoResponse.ok) {
-      console.error("❌ Error al consultar pago:", await pagoResponse.text());
-      return res.sendStatus(500);
+    if (!type || !data?.id) {
+      console.warn(`[${timestamp}] ⚠️ Webhook sin datos válidos`);
+      return res.sendStatus(200);
     }
 
-    const pago = await pagoResponse.json();
-    console.log("🧾 Estado del pago:", pago.status);
+    console.log(`[${timestamp}] 📌 Tipo: ${type} | Acción: ${action}`);
 
-    if (pago.status === "approved") {
-      const libroId =
-        pago.metadata?.libroId ||
-        pago.external_reference ||
-        pago.additional_info?.items?.[0]?.id;
+    let pago = null;
+    let externalReference = null;
 
-      const amount = pago.transaction_amount || 0;
-
-      // 🟢 Guardar en Supabase
-      const { error: insertError } = await supabase.from("pagos").insert([
+    // ==========================
+    // 🟢 1. INTENTO CON PAYMENT
+    // ==========================
+    if (type === "payment" && data.id) {
+      const paymentRes = await fetch(
+        `https://api.mercadopago.com/v1/payments/${data.id}`,
         {
-          payment_id: paymentId,
-          libro_id: libroId,
-          status: pago.status,
-          amount: amount,
-          currency: pago.currency_id || "ARS",
-        },
-      ]);
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
 
-      if (insertError) {
-        console.error("❌ Error insertando en Supabase:", insertError.message);
+      if (paymentRes.ok) {
+        pago = await paymentRes.json();
+        externalReference = pago.external_reference;
+        console.log(
+          `[${timestamp}] 💳 Pago consultado [${pago.id}] -> ${pago.status}`
+        );
       } else {
-        console.log("✅ Pago guardado en Supabase correctamente.");
+        console.error(
+          `[${timestamp}] ❌ Error al consultar pago:`,
+          await paymentRes.text()
+        );
       }
     }
 
-    res.sendStatus(200);
+    // ====================================
+    // 🟡 2. SI NO ESTÁ APROBADO, CONSULTA ORDEN
+    // ====================================
+    if (!pago || pago.status !== "approved") {
+      console.log(`[${timestamp}] 🔎 Consultando merchant_order...`);
+
+      const orderRes = await fetch(
+        `https://api.mercadopago.com/merchant_orders/${data.id}`,
+        {
+          headers: { Authorization: `Bearer ${accessToken}` },
+        }
+      );
+
+      if (orderRes.ok) {
+        const orden = await orderRes.json();
+        console.log(
+          `[${timestamp}] 📦 Orden encontrada [${orden.id}] con ${orden.payments?.length || 0} pagos`
+        );
+
+        externalReference = orden.external_reference || externalReference;
+
+        const pagoAprobado = orden.payments?.find(
+          (p) => p.status === "approved"
+        );
+
+        if (pagoAprobado) {
+          console.log(
+            `[${timestamp}] 💚 Pago aprobado detectado en orden: ${pagoAprobado.id}`
+          );
+
+          const pagoFinalRes = await fetch(
+            `https://api.mercadopago.com/v1/payments/${pagoAprobado.id}`,
+            {
+              headers: { Authorization: `Bearer ${accessToken}` },
+            }
+          );
+
+          if (pagoFinalRes.ok) {
+            pago = await pagoFinalRes.json();
+          } else {
+            console.error(
+              `[${timestamp}] ❌ No se pudo obtener detalles del pago aprobado`
+            );
+          }
+        }
+      } else {
+        console.error(
+          `[${timestamp}] ❌ Error al consultar merchant_order:`,
+          await orderRes.text()
+        );
+      }
+    }
+
+    // ==========================
+    // 🔴 3. SI NO HAY APROBADO, SALIMOS
+    // ==========================
+    if (!pago || pago.status !== "approved") {
+      console.warn(`[${timestamp}] ⛔️ Aún no hay pago aprobado`);
+      return res.sendStatus(200);
+    }
+
+    // ==========================
+    // 🧾 4. EXTRAER DATOS
+    // ==========================
+    const paymentId = pago.id?.toString();
+    const libroId =
+      pago.metadata?.libroId?.toString() ||
+      pago.external_reference?.toString() ||
+      externalReference?.toString() ||
+      pago.additional_info?.items?.[0]?.id?.toString() ||
+      null;
+
+    const amount = pago.transaction_amount || 0;
+    const currency = pago.currency_id || "ARS";
+    const status = pago.status || "unknown";
+
+    console.log(`[${timestamp}] 💾 Datos para guardar:`, {
+      payment_id: paymentId,
+      libro_id: libroId,
+      status,
+      amount,
+      currency,
+    });
+
+    if (!libroId) {
+      console.warn(`[${timestamp}] ⚠️ No se encontró libro_id, se omite guardado`);
+      return res.sendStatus(200);
+    }
+
+    // ==========================
+    // 💽 5. GUARDAR EN SUPABASE
+    // ==========================
+    const { error: insertError } = await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId,
+        libro_id: libroId,
+        status,
+        amount,
+        currency,
+      },
+    ]);
+
+    if (insertError) {
+      console.error(`[${timestamp}] ❌ Error al insertar en Supabase:`, insertError.message);
+      return res.sendStatus(500);
+    }
+
+    console.log(`[${timestamp}] ✅ Pago guardado correctamente en Supabase`);
+    return res.sendStatus(200);
   } catch (error) {
-    console.error("❌ Error procesando webhook:", error);
-    res.sendStatus(500);
+    console.error(`[${timestamp}] 💥 Error general en webhook:`, error);
+    return res.sendStatus(500);
   }
 });
+
+
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
@@ -163,7 +272,36 @@ app.get("/webhook_estado", async (req, res) => {
     console.error("❌ Error en /webhook_estado:", err);
     res.status(500).json({ error: "Error al consultar el pago" });
   }
+}); 
+
+app.post("/registrar_pago_manual", async (req, res) => {
+  try {
+    const { libro_id, status, payment_id, amount, currency } = req.body;
+
+    if (!libro_id || !status) {
+      return res.status(400).json({ error: "Datos incompletos" });
+    }
+
+    const { error } = await supabase.from("pagos").insert([
+      {
+        libro_id,
+        status,
+        payment_id,
+        amount,
+        currency,
+      },
+    ]);
+
+    if (error) throw error;
+
+    console.log("💾 Pago registrado manualmente desde frontend:", libro_id);
+    res.json({ ok: true });
+  } catch (err) {
+    console.error("❌ Error en /registrar_pago_manual:", err);
+    res.status(500).json({ error: "Error al registrar pago manualmente" });
+  }
 });
+
 
 
 
