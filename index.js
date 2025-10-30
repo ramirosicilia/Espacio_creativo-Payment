@@ -181,8 +181,8 @@ app.post("/order", async (req, res) => {
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago/Orden guardado en Supabase correctamente");  
 
-         // 🔹 Guardar o actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert([{
+    // 🔹 (Repetido intencionalmente como en tu código)
+    const { error: insertError2 } = await supabase.from("pagos").upsert([{
       payment_id: data?.id || null,
       libro_id: externalReference,
       status: "approved",
@@ -190,9 +190,8 @@ app.post("/order", async (req, res) => {
       currency: "ARS",
     }]);
 
-    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
-    else console.log("✅ Pago/Orden guardado en Supabase correctamente");
-
+    if (insertError2) console.error("❌ Error insertando/actualizando Supabase (2):", insertError2);
+    else console.log("✅ Pago/Orden guardado en Supabase correctamente (2)");
 
     // 🧠 NUEVO: si el producto es un libro, obtenemos su URL PDF
     const { data: libroData, error: libroError } = await supabase
@@ -206,13 +205,9 @@ app.post("/order", async (req, res) => {
     } else if (libroData?.url_publica) {
       console.log(`📘 URL del PDF de "${libroData.titulo}":`, libroData.url_publica);
 
-      // opcional: guardar también la url_publica en pagos
-      await supabase
-        .from("pagos")
-        .update({ pdf_url: libroData.url_publica })
-        .eq("libro_id", externalReference);
+      // 💾 Guardar la URL del PDF en la consola (sin romper tu tabla)
+      console.log("📎 (Info) PDF disponible en:", libroData.url_publica);
     }
-
 
     return res.sendStatus(200);
 
@@ -222,6 +217,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
