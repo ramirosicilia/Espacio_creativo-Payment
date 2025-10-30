@@ -179,10 +179,40 @@ app.post("/order", async (req, res) => {
     }]);
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    else console.log("✅ Pago/Orden guardado en Supabase correctamente");  
+
+         // 🔹 Guardar o actualizar en Supabase
+    const { error: insertError } = await supabase.from("pagos").upsert([{
+      payment_id: data?.id || null,
+      libro_id: externalReference,
+      status: "approved",
+      amount,
+      currency: "ARS",
+    }]);
+
+    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
-    console.log("✅ Proceso finalizado Webhook /order");
-    console.log("===============================================================");
+
+    // 🧠 NUEVO: si el producto es un libro, obtenemos su URL PDF
+    const { data: libroData, error: libroError } = await supabase
+      .from("libros_urls")
+      .select("url_publica, titulo")
+      .eq("libro_id", externalReference)
+      .single();
+
+    if (libroError) {
+      console.error("⚠️ Error al obtener URL del libro:", libroError);
+    } else if (libroData?.url_publica) {
+      console.log(`📘 URL del PDF de "${libroData.titulo}":`, libroData.url_publica);
+
+      // opcional: guardar también la url_publica en pagos
+      await supabase
+        .from("pagos")
+        .update({ pdf_url: libroData.url_publica })
+        .eq("libro_id", externalReference);
+    }
+
 
     return res.sendStatus(200);
 
