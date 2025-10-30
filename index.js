@@ -181,6 +181,39 @@ app.post("/order", async (req, res) => {
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
+    // 🟢🟢🟢 LÓGICA AGREGADA PARA DESCARGA DE PDF (sin borrar nada)
+    try {
+      console.log("📚 Buscando PDF del libro en Supabase...");
+      const { data: libroData, error: libroError } = await supabase
+        .from("libros_urls")
+        .select("url_publica, titulo")
+        .eq("libro_id", externalReference)
+        .maybeSingle();
+
+      if (libroError) {
+        console.warn("⚠️ No se encontró el PDF del libro:", libroError.message);
+      } else if (libroData && libroData.url_publica) {
+        console.log("✅ PDF encontrado:", libroData.url_publica);
+
+        // Guardamos la URL pública del PDF en la tabla pagos (si querés rastrear)
+        const { error: updateError } = await supabase
+          .from("pagos")
+          .update({ url_pdf: libroData.url_publica })
+          .eq("libro_id", externalReference);
+
+        if (updateError) {
+          console.warn("⚠️ No se pudo actualizar url_pdf en pagos:", updateError.message);
+        } else {
+          console.log("💾 URL del PDF guardada en la tabla pagos correctamente.");
+        }
+      } else {
+        console.log("📭 No hay PDF asociado para este libro.");
+      }
+    } catch (pdfErr) {
+      console.error("❌ Error buscando o guardando PDF:", pdfErr);
+    }
+    // 🟢🟢🟢 FIN DE LÓGICA AGREGADA
+
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
 
