@@ -181,6 +181,27 @@ app.post("/order", async (req, res) => {
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
+
+    // 🚀🚀🚀 AGREGADO NUEVO: buscar el PDF y guardarlo en la tabla pagos
+    console.log("🔍 Buscando PDF en tabla libros_urls para libro_id:", externalReference);
+
+    const { data: libroData, error: libroError } = await supabase
+      .from("libros_urls")
+      .select("url_publica, titulo")
+      .eq("libro_id", externalReference)
+      .single();
+
+    if (libroError) {
+      console.warn("⚠️ No se encontró PDF del libro:", libroError);
+    } else if (libroData) {
+      console.log("📘 Libro encontrado:", libroData);
+      await supabase
+        .from("pagos")
+        .update({ pdf_url: libroData.url_publica })
+        .eq("libro_id", externalReference);
+      console.log("✅ URL del PDF guardada en pagos correctamente");
+    }
+
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
 
@@ -192,6 +213,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
