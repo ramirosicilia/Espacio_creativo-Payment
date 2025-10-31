@@ -44,26 +44,27 @@ app.post("/create_preference", async (req, res) => {
       return res.status(400).json({ error: "No se recibieron productos válidos." });
 
     const preferenceBody = {
-      items: mp.map((item) => ({
-        id: item.id,
-        title: item.name,
-        quantity: Number(item.quantity),
-        unit_price: Number(item.unit_price),
-        currency_id: "ARS",
-      })),
-      metadata: {
-        libroId: mp[0].id,
-        categoria: mp[0].categoria,
-      },
-      external_reference: mp[0].id,
-      notification_url: `${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
-      back_urls: {
-        success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-        failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-        pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-      },
-      auto_return: "approved",
-    };
+  items: mp.map((item) => ({
+    id: item.id,
+    title: item.name,
+    quantity: Number(item.quantity),
+    unit_price: Number(item.unit_price),
+    currency_id: "ARS",
+  })),
+  metadata: {
+    libroId: mp[0].id,
+    categoria: mp[0].categoria, // 👈 agregamos categoría para redirigir correctamente
+  },
+  external_reference: mp[0].id,
+  notification_url:`${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
+  back_urls: {
+    success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+    failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+    pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+  },
+  auto_return: "approved",
+};
+
 
     const result = await preference.create({ body: preferenceBody });
     console.log("🟢 Preferencia creada:", result.id);
@@ -74,9 +75,7 @@ app.post("/create_preference", async (req, res) => {
   }
 });
 
-// ====================================================================
-// 📬 Webhook MercadoPago (ADAPTADO PERO SIN SACAR LÍNEAS TUYAS)
-// ====================================================================
+// 🧾 Webhook MercadoPago
 app.post("/order", async (req, res) => {
   try {
     console.log("==================📩 WEBHOOK /order ==================");
@@ -92,9 +91,6 @@ app.post("/order", async (req, res) => {
 
     let externalReference = null;
     let amount = 0;
-
-    // 🟢 agregado: nueva variable para guardar URL del PDF
-    let pdf_url = null;
 
     // 🔹 Si llega un payment
     if (topic === "payment" || type === "payment") {
@@ -146,18 +142,6 @@ app.post("/order", async (req, res) => {
           console.error("❌ Error consultando merchant_order");
         }
       }
-
-      // 🟢 agregado: obtener la URL pública del libro desde Supabase
-      if (externalReference) {
-        const { data: libroData, error: libroError } = await supabase
-          .from("libros_urls")
-          .select("url_publica")
-          .eq("libro_id", externalReference)
-          .single();
-
-        if (libroError) console.error("⚠️ Error buscando libro:", libroError);
-        else pdf_url = libroData?.url_publica || null;
-      }
     }
 
     // 🔹 Si llega un merchant_order directo
@@ -172,16 +156,6 @@ app.post("/order", async (req, res) => {
         console.log("📦 merchant_order info:", JSON.stringify(orderData, null, 2));
         externalReference = orderData.external_reference;
         amount = orderData.payments?.reduce((sum, p) => sum + p.transaction_amount, 0) || 0;
-
-        // 🟢 agregado también aquí
-        const { data: libroData, error: libroError } = await supabase
-          .from("libros_urls")
-          .select("url_publica")
-          .eq("libro_id", externalReference)
-          .single();
-
-        if (libroError) console.error("⚠️ Error buscando libro:", libroError);
-        else pdf_url = libroData?.url_publica || null;
       } else {
         console.error("❌ Error consultando merchant_order");
       }
@@ -196,16 +170,13 @@ app.post("/order", async (req, res) => {
     console.log("💰 Monto:", amount);
 
     // 🔹 Guardar o actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert([
-      {
-        payment_id: data?.id || null,
-        libro_id: externalReference,
-        status: "approved",
-        amount,
-        pdf_url, // 🟢 agregado: guardamos URL del libro
-        currency: "ARS",
-      },
-    ]);
+    const { error: insertError } = await supabase.from("pagos").upsert([{
+      payment_id: data?.id || null,
+      libro_id: externalReference,
+      status: "approved",
+      amount,
+      currency: "ARS",
+    }]);
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago/Orden guardado en Supabase correctamente");
@@ -214,6 +185,7 @@ app.post("/order", async (req, res) => {
     console.log("===============================================================");
 
     return res.sendStatus(200);
+
   } catch (error) {
     console.error("🔥 ERROR en webhook /order:", error);
     console.log("===============================================================");
@@ -221,9 +193,7 @@ app.post("/order", async (req, res) => {
   }
 });
 
-// ====================================================================
-// 🔍 Consulta desde el front (igual que el tuyo, solo envío la URL PDF)
-// ====================================================================
+// 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
   const libroId = req.query.libroId;
   console.log("📘 Consultando libroId:", libroId, typeof libroId);
@@ -243,12 +213,7 @@ app.get("/webhook_estado", async (req, res) => {
 
       if (data && data.length > 0) {
         console.log("✅ Pago encontrado:", data);
-        // 🟢 agregado: enviar también URL PDF
-        return res.json({
-          pago_exitoso: true,
-          data,
-          pdf_url: data[0].pdf_url || null,
-        });
+        return res.json({ pago_exitoso: true, data });
       }
 
       intentos++;
@@ -264,7 +229,8 @@ app.get("/webhook_estado", async (req, res) => {
   }
 });
 
-// ====================================================================
+
+
 app.listen(port, () =>
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`)
 );
