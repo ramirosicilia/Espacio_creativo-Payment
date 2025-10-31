@@ -179,35 +179,10 @@ app.post("/order", async (req, res) => {
     }]);
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
-    else console.log("✅ Pago/Orden guardado en Supabase correctamente");  
+    else console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
-    // 🔹 (Repetido intencionalmente como en tu código)
-    const { error: insertError2 } = await supabase.from("pagos").upsert([{
-      payment_id: data?.id || null,
-      libro_id: externalReference,
-      status: "approved",
-      amount,
-      currency: "ARS",
-    }]);
-
-    if (insertError2) console.error("❌ Error insertando/actualizando Supabase (2):", insertError2);
-    else console.log("✅ Pago/Orden guardado en Supabase correctamente (2)");
-
-    // 🧠 NUEVO: si el producto es un libro, obtenemos su URL PDF
-    const { data: libroData, error: libroError } = await supabase
-      .from("libros_urls")
-      .select("url_publica, titulo")
-      .eq("libro_id", externalReference)
-      .single();
-
-    if (libroError) {
-      console.error("⚠️ Error al obtener URL del libro:", libroError);
-    } else if (libroData?.url_publica) {
-      console.log(`📘 URL del PDF de "${libroData.titulo}":`, libroData.url_publica);
-
-      // 💾 Guardar la URL del PDF en la consola (sin romper tu tabla)
-      console.log("📎 (Info) PDF disponible en:", libroData.url_publica);
-    }
+    console.log("✅ Proceso finalizado Webhook /order");
+    console.log("===============================================================");
 
     return res.sendStatus(200);
 
@@ -217,7 +192,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
