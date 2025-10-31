@@ -169,29 +169,47 @@ app.post("/order", async (req, res) => {
     console.log("🔎 externalReference FINAL:", externalReference);
     console.log("💰 Monto:", amount);
 
-    // 🔹 Guardar o actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert([{
-      payment_id: data?.id || null,
-      libro_id: externalReference,
-      status: "approved",
-      amount,
-      currency: "ARS",
-    }]);
+    // 🔹 Buscar el libro en la tabla `libros_urls`
+    const { data: libroData, error: libroError } = await supabase
+      .from("libros_urls")
+      .select("titulo, url_publica, archivo")
+      .eq("libro_id", externalReference)
+      .single();
 
-    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
-    else console.log("✅ Pago/Orden guardado en Supabase correctamente");
+    if (libroError || !libroData) {
+      console.error("⚠️ No se encontró el libro en la tabla libros_urls:", libroError);
+    } else {
+      console.log("📘 Libro encontrado:", libroData);
+    }
+
+    // 🔹 Guardar o actualizar en Supabase
+    const { error: insertError } = await supabase.from("pagos").upsert([
+      {
+        payment_id: data?.id || null,
+        libro_id: externalReference,
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url: libroData?.url_publica || libroData?.archivo || null,
+      },
+    ]);
+
+    if (insertError)
+      console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    else
+      console.log("✅ Pago + Libro guardado en Supabase correctamente con PDF incluido");
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
 
     return res.sendStatus(200);
-
   } catch (error) {
     console.error("🔥 ERROR en webhook /order:", error);
     console.log("===============================================================");
     res.sendStatus(500);
   }
 });
+
 
 // 🔍 Consulta desde el front para desbloquear
 app.get("/webhook_estado", async (req, res) => {
