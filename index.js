@@ -75,7 +75,7 @@ app.post("/create_preference", async (req, res) => {
 });
 
 // ===========================================================
-// 🧾 Webhook MercadoPago
+// 🧾 WEBHOOK MERCADO PAGO
 // ===========================================================
 app.post("/order", async (req, res) => {
   try {
@@ -88,7 +88,7 @@ app.post("/order", async (req, res) => {
     let amount = 0;
     let pdf_url = null;
 
-    // 🟢 1️⃣ Evento de pago
+    // 🟢 1️⃣ Si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
       paymentId = data?.id || resource;
       if (!paymentId) {
@@ -118,7 +118,7 @@ app.post("/order", async (req, res) => {
       externalReference = pago.external_reference || pago.metadata?.libroId;
       amount = pago.transaction_amount || 0;
 
-      // Si falta externalReference, intentamos buscar merchant_order
+      // Intentar recuperar external_reference si no viene en pago
       if (!externalReference && pago.order?.id) {
         const orderResponse = await fetch(
           `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
@@ -131,7 +131,7 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🟢 2️⃣ Evento merchant_order
+    // 🟢 2️⃣ Si el webhook viene por "merchant_order"
     if (topic === "merchant_order") {
       console.log("🔹 Webhook merchant_order directo");
       const orderResponse = await fetch(resource, {
@@ -146,7 +146,6 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // Validación final
     if (!externalReference) {
       console.warn("❌ No se pudo obtener externalReference");
       return res.sendStatus(200);
@@ -164,7 +163,7 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // 🧩 Validar si ya existe un pago similar
+    // 🧩 Validar si ya existe un pago igual
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("id")
@@ -178,7 +177,7 @@ app.post("/order", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 🟢 4️⃣ Insertar o actualizar pago (evita duplicados por payment_id)
+    // 🟢 4️⃣ Insertar / actualizar en Supabase
     const { error: insertError } = await supabase.from("pagos").upsert(
       [
         {
@@ -207,7 +206,7 @@ app.post("/order", async (req, res) => {
 });
 
 // ===========================================================
-// ✅ CONSULTA DESDE FRONT: /webhook_estado
+// ✅ CONSULTA DESDE EL FRONT: /webhook_estado
 // ===========================================================
 app.get("/webhook_estado", async (req, res) => {
   try {
