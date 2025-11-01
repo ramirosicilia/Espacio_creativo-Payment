@@ -163,21 +163,20 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // 🧩 Validar si ya existe un pago igual
+    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro (sin importar payment_id)
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("id")
       .eq("libro_id", String(externalReference))
       .eq("status", "approved")
-      .eq("amount", amount)
       .limit(1);
 
-    if (pagoExistente?.length > 0) {
-      console.log("⚠️ Pago ya existente, no se duplica en Supabase");
+    if (pagoExistente && pagoExistente.length > 0) {
+      console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
       return res.sendStatus(200);
     }
 
-    // 🟢 4️⃣ Insertar / actualizar en Supabase
+    // 🟢 5️⃣ Insertar / actualizar en Supabase
     const { error: insertError } = await supabase.from("pagos").upsert(
       [
         {
@@ -204,6 +203,8 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
+
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
