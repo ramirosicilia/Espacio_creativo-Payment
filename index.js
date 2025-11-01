@@ -44,27 +44,26 @@ app.post("/create_preference", async (req, res) => {
       return res.status(400).json({ error: "No se recibieron productos válidos." });
 
     const preferenceBody = {
-  items: mp.map((item) => ({
-    id: item.id,
-    title: item.name,
-    quantity: Number(item.quantity),
-    unit_price: Number(item.unit_price),
-    currency_id: "ARS",
-  })),
-  metadata: {
-    libroId: mp[0].id,
-    categoria: mp[0].categoria, // 👈 agregamos categoría para redirigir correctamente
-  },
-  external_reference: mp[0].id,
-  notification_url:`${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
-  back_urls: {
-    success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-    failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-    pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
-  },
-  auto_return: "approved",
-};
-
+      items: mp.map((item) => ({
+        id: item.id,
+        title: item.name,
+        quantity: Number(item.quantity),
+        unit_price: Number(item.unit_price),
+        currency_id: "ARS",
+      })),
+      metadata: {
+        libroId: mp[0].id,
+        categoria: mp[0].categoria, // 👈 agregamos categoría para redirigir correctamente
+      },
+      external_reference: mp[0].id,
+      notification_url: `${process.env.URL_PAYMENTS}/order`, // 🟢 tu webhook /orden
+      back_urls: {
+        success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+        failure: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+        pending: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
+      },
+      auto_return: "approved",
+    };
 
     const result = await preference.create({ body: preferenceBody });
     console.log("🟢 Preferencia creada:", result.id);
@@ -169,23 +168,46 @@ app.post("/order", async (req, res) => {
     console.log("🔎 externalReference FINAL:", externalReference);
     console.log("💰 Monto:", amount);
 
-    // 🔹 Guardar o actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert([{
-      payment_id: data?.id || null,
-      libro_id: externalReference,
-      status: "approved",
-      amount,
-      currency: "ARS",
-    }]);
+    // 🟢 LÓGICA EXTRA LIBROS: buscamos si el externalReference pertenece a un libro
+    let pdf_url = null;
+    try {
+      const { data: libroEncontrado, error: libroError } = await supabase
+        .from("libros_urls")
+        .select("url_publica")
+        .eq("libro_id", externalReference)
+        .single();
 
-    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
-    else console.log("✅ Pago/Orden guardado en Supabase correctamente");
+      if (libroError) {
+        console.warn("⚠️ No se encontró libro en libros_urls o error:", libroError.message);
+      } else if (libroEncontrado) {
+        pdf_url = libroEncontrado.url_publica;
+        console.log("📘 Libro encontrado en libros_urls con URL pública:", pdf_url);
+      }
+    } catch (libErr) {
+      console.error("❌ Error al consultar libros_urls:", libErr);
+    }
+
+    // 🔹 Guardar o actualizar en Supabase
+    const { error: insertError } = await supabase.from("pagos").upsert([
+      {
+        payment_id: data?.id || null,
+        libro_id: externalReference,
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url: pdf_url || null, // 🟢 guardamos si es libro
+      },
+    ]);
+
+    if (insertError)
+      console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    else
+      console.log("✅ Pago/Orden guardado en Supabase correctamente");
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
 
     return res.sendStatus(200);
-
   } catch (error) {
     console.error("🔥 ERROR en webhook /order:", error);
     console.log("===============================================================");
@@ -203,6 +225,7 @@ app.get("/webhook_estado", async (req, res) => {
 
   try {
     while (intentos < maxIntentos) {
+      // Buscar pago aprobado
       const { data, error } = await supabase
         .from("pagos")
         .select("*")
@@ -213,7 +236,24 @@ app.get("/webhook_estado", async (req, res) => {
 
       if (data && data.length > 0) {
         console.log("✅ Pago encontrado:", data);
-        return res.json({ pago_exitoso: true, data });
+
+        // 🟢 Si el pago existe, buscar la URL pública del libro
+        const { data: libroData, error: libroError } = await supabase
+          .from("libros_urls")
+          .select("url_publica")
+          .eq("libro_id", +libroId)
+          .limit(1)
+          .maybeSingle();
+
+        if (libroError) throw libroError;
+
+        // Combinar la info del pago con la URL pública
+        const pagoConUrl = {
+          ...data[0],
+          url_publica: libroData?.url_publica || null,
+        };
+
+        return res.json({ pago_exitoso: true, data: [pagoConUrl] });
       }
 
       intentos++;
@@ -228,7 +268,6 @@ app.get("/webhook_estado", async (req, res) => {
     res.status(500).json({ error: "Error al consultar el pago" });
   }
 });
-
 
 
 app.listen(port, () =>
