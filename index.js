@@ -80,27 +80,21 @@ app.post("/order", async (req, res) => {
     console.log("==================📩 WEBHOOK /order ==================");
     console.log("➡️ BODY COMPLETO:", JSON.stringify(req.body, null, 2));
 
-    const { type, action, data, topic, resource } = req.body;
-
-    console.log("📌 type:", type);
-    console.log("📌 action:", action);
-    console.log("📌 data:", data);
-    console.log("📌 topic:", topic);
-    console.log("📌 resource:", resource);
-
+    const { type, topic, action, data, resource } = req.body;
+    let paymentId = null;
     let externalReference = null;
     let amount = 0;
+    let pdf_url = null;
 
-    // 🔹 Si llega un payment
+    // 🟢 1️⃣ Si llega un evento de pago
     if (topic === "payment" || type === "payment") {
-      const paymentId = data?.id || resource;
+      paymentId = data?.id || resource;
       if (!paymentId) {
-        console.warn("⚠️ No hay paymentId");
+        console.warn("⚠️ No hay paymentId en el webhook.");
         return res.sendStatus(200);
       }
 
       console.log("🔍 Consultando pago con ID:", paymentId);
-
       const pagoResponse = await fetch(
         `https://api.mercadopago.com/v1/payments/${paymentId}`,
         { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
@@ -115,35 +109,28 @@ app.post("/order", async (req, res) => {
       console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
 
       if (pago.status !== "approved") {
-        console.log("⛔ Pago no aprobado → No se procesa");
+        console.log("⛔ Pago no aprobado → se ignora.");
         return res.sendStatus(200);
       }
 
       console.log("✅ Pago aprobado");
-
       externalReference = pago.external_reference || pago.metadata?.libroId;
       amount = pago.transaction_amount || 0;
 
-      // 🔹 Si no viene externalReference, usamos merchant_order
+      // Si falta externalReference, intentamos buscar merchant_order
       if (!externalReference && pago.order?.id) {
-        console.log("⚠️ externalReference ausente, consultando merchant_order...");
-
         const orderResponse = await fetch(
           `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
           { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
         );
-
         if (orderResponse.ok) {
           const orderData = await orderResponse.json();
-          console.log("📦 merchant_order info:", JSON.stringify(orderData, null, 2));
           externalReference = orderData.external_reference;
-        } else {
-          console.error("❌ Error consultando merchant_order");
         }
       }
     }
 
-    // 🔹 Si llega un merchant_order directo
+    // 🟢 2️⃣ Si llega merchant_order directo
     if (topic === "merchant_order") {
       console.log("🔹 Webhook merchant_order directo");
       const orderResponse = await fetch(resource, {
@@ -152,116 +139,97 @@ app.post("/order", async (req, res) => {
 
       if (orderResponse.ok) {
         const orderData = await orderResponse.json();
-        console.log("📦 merchant_order info:", JSON.stringify(orderData, null, 2));
         externalReference = orderData.external_reference;
         amount = orderData.payments?.reduce((sum, p) => sum + p.transaction_amount, 0) || 0;
-      } else {
-        console.error("❌ Error consultando merchant_order");
       }
     }
 
+    // Validación final
     if (!externalReference) {
-      console.error("❌ No se pudo obtener externalReference");
+      console.warn("❌ No se pudo obtener externalReference");
       return res.sendStatus(200);
     }
 
-    console.log("🔎 externalReference FINAL:", externalReference);
+    console.log("📗 Libro (externalReference):", externalReference);
     console.log("💰 Monto:", amount);
 
-    // 🟢 LÓGICA EXTRA LIBROS: buscamos si el externalReference pertenece a un libro
-    let pdf_url = null;
-    try {
-      const { data: libroEncontrado, error: libroError } = await supabase
-        .from("libros_urls")
-        .select("url_publica")
-        .eq("libro_id", String(externalReference)) // 👈 corregido
-        .single();
+    // 🟢 3️⃣ Buscar URL pública del libro
+    const { data: libroEncontrado } = await supabase
+      .from("libros_urls")
+      .select("url_publica")
+      .eq("libro_id", String(externalReference))
+      .single();
 
-      if (libroError) {
-        console.warn("⚠️ No se encontró libro en libros_urls o error:", libroError.message);
-      } else if (libroEncontrado) {
-        pdf_url = libroEncontrado.url_publica;
-        console.log("📘 Libro encontrado en libros_urls con URL pública:", pdf_url);
-      }
-    } catch (libErr) {
-      console.error("❌ Error al consultar libros_urls:", libErr);
-    }
+    pdf_url = libroEncontrado?.url_publica || null;
 
-    // 🔹 Guardar o actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert([
-      {
-        payment_id: data?.id || null,
-        libro_id: String(externalReference), // 👈 corregido
-        status: "approved",
-        amount,
-        currency: "ARS",
-        pdf_url: pdf_url || null, // 🟢 guardamos si es libro
-      },
-    ]);
+    // 🟢 4️⃣ Insertar o actualizar pago (evita duplicados por payment_id)
+    const { error: insertError } = await supabase.from("pagos").upsert(
+      [
+        {
+          payment_id: String(paymentId),
+          libro_id: String(externalReference),
+          status: "approved",
+          amount,
+          currency: "ARS",
+          pdf_url,
+        },
+      ],
+      { onConflict: "payment_id" } // 👈 evita duplicados
+    );
 
     if (insertError)
       console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else
-      console.log("✅ Pago/Orden guardado en Supabase correctamente");
+      console.log("✅ Pago guardado correctamente en Supabase");
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
-
     return res.sendStatus(200);
   } catch (error) {
     console.error("🔥 ERROR en webhook /order:", error);
-    console.log("===============================================================");
     res.sendStatus(500);
   }
 });
 
-// 🔍 Consulta desde el front para desbloquear
+// ===========================================================
+// ✅ CONSULTA DESDE FRONT: /webhook_estado
+// ===========================================================
 app.get("/webhook_estado", async (req, res) => {
-  const libroId = req.query.libroId;
-  console.log("📘 Consultando libroId:", libroId, typeof libroId);
-
-  let intentos = 0;
-  const maxIntentos = 20; // espera máx. 10 veces (~15s)
-
   try {
-    while (intentos < maxIntentos) {
-      // Buscar pago aprobado
-      const { data, error } = await supabase
-        .from("pagos")
-        .select("*")
-        .eq("libro_id", String(libroId)) // 👈 corregido
-        .eq("status", "approved");
+    const { libroId } = req.query;
+    if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
-      if (error) throw error;
+    console.log("📘 Consultando estado del libro:", libroId);
 
-      if (data && data.length > 0) {
-        console.log("✅ Pago encontrado:", data);
+    // Buscar pago aprobado
+    const { data, error } = await supabase
+      .from("pagos")
+      .select("*")
+      .eq("libro_id", String(libroId))
+      .eq("status", "approved");
 
-        // 🟢 Si el pago existe, buscar la URL pública del libro
-        const { data: libroData, error: libroError } = await supabase
-          .from("libros_urls")
-          .select("url_publica")
-          .eq("libro_id", String(libroId)) // 👈 corregido
-          .limit(1)
-          .maybeSingle();
+    if (error) throw error;
 
-        if (libroError) throw libroError;
+    if (data && data.length > 0) {
+      const pago = data[0];
+      console.log("✅ Pago encontrado:", pago);
 
-        // Combinar la info del pago con la URL pública
-        const pagoConUrl = {
-          ...data[0],
-          url_publica: libroData?.url_publica || data[0].pdf_url || null, // 👈 aseguramos devolver algo
-        };
+      // Buscar URL pública del libro
+      const { data: libroData } = await supabase
+        .from("libros_urls")
+        .select("url_publica")
+        .eq("libro_id", String(libroId))
+        .maybeSingle();
 
-        return res.json({ pago_exitoso: true, data: [pagoConUrl] });
-      }
+      const pagoConUrl = {
+        ...pago,
+        url_publica: libroData?.url_publica || pago.pdf_url || null,
+      };
 
-      intentos++;
-      console.log(`⏳ Intento ${intentos}: no se encontró pago aún...`);
-      await new Promise((r) => setTimeout(r, 1500)); // espera 1.5 segundos
+      return res.json({ pago_exitoso: true, data: [pagoConUrl] });
     }
 
-    console.warn("⚠️ No se detectó pago después de varios intentos.");
+    console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
     res.json({ pago_exitoso: false, data: [] });
   } catch (err) {
     console.error("❌ Error en /webhook_estado:", err);
@@ -269,7 +237,7 @@ app.get("/webhook_estado", async (req, res) => {
   }
 });
 
-
+// ===========================================================
 app.listen(port, () =>
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`)
 );
