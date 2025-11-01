@@ -222,18 +222,19 @@ app.post("/order", async (req, res) => {
 
     // 🟢 5️⃣ Insertar / actualizar en Supabase
     const { error: insertError } = await supabase.from("pagos").upsert(
-      [
-        {
-          payment_id: paymentId ? String(paymentId) : null,
-          libro_id: String(externalReference),
-          status: "approved",
-          amount,
-          currency: "ARS",
-          pdf_url,
-        },
-      ],
-      { onConflict: paymentId ? "payment_id" : undefined }
-    );
+  [
+    {
+      payment_id: paymentId ? String(paymentId) : null,
+      libro_id: String(externalReference),
+      status: "approved",
+      amount,
+      currency: "ARS",
+      pdf_url,
+    },
+  ],
+  { onConflict: paymentId ? "payment_id" : "libro_id" } // ✅ asegura actualización del amount
+);
+
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago guardado correctamente en Supabase");
