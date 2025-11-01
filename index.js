@@ -117,7 +117,12 @@ app.post("/order", async (req, res) => {
 
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
-      amount = Number(pago.transaction_amount) || 0;
+
+      // 🟢 CAMBIO AQUÍ: se agrega total_paid_amount como alternativa
+      amount =
+        Number(pago.transaction_amount) ||
+        Number(pago.transaction_details?.total_paid_amount) ||
+        0;
 
       // Recuperar external_reference desde la orden si no viene en pago
       if (!externalReference && pago.order?.id) {
@@ -222,19 +227,18 @@ app.post("/order", async (req, res) => {
 
     // 🟢 5️⃣ Insertar / actualizar en Supabase
     const { error: insertError } = await supabase.from("pagos").upsert(
-  [
-    {
-      payment_id: paymentId ? String(paymentId) : null,
-      libro_id: String(externalReference),
-      status: "approved",
-      amount,
-      currency: "ARS",
-      pdf_url,
-    },
-  ],
-  { onConflict: paymentId ? "payment_id" : "libro_id" } // ✅ asegura actualización del amount
-);
-
+      [
+        {
+          payment_id: paymentId ? String(paymentId) : null,
+          libro_id: String(externalReference),
+          status: "approved",
+          amount,
+          currency: "ARS",
+          pdf_url,
+        },
+      ],
+      { onConflict: paymentId ? "payment_id" : "libro_id" } // ✅ asegura actualización del amount
+    );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago guardado correctamente en Supabase");
@@ -247,6 +251,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
