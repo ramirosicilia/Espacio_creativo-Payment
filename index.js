@@ -174,7 +174,7 @@ app.post("/order", async (req, res) => {
       const { data: libroEncontrado, error: libroError } = await supabase
         .from("libros_urls")
         .select("url_publica")
-        .eq("libro_id", externalReference)
+        .eq("libro_id", String(externalReference)) // 👈 corregido
         .single();
 
       if (libroError) {
@@ -191,7 +191,7 @@ app.post("/order", async (req, res) => {
     const { error: insertError } = await supabase.from("pagos").upsert([
       {
         payment_id: data?.id || null,
-        libro_id: externalReference,
+        libro_id: String(externalReference), // 👈 corregido
         status: "approved",
         amount,
         currency: "ARS",
@@ -229,7 +229,7 @@ app.get("/webhook_estado", async (req, res) => {
       const { data, error } = await supabase
         .from("pagos")
         .select("*")
-        .eq("libro_id", +libroId)
+        .eq("libro_id", String(libroId)) // 👈 corregido
         .eq("status", "approved");
 
       if (error) throw error;
@@ -241,7 +241,7 @@ app.get("/webhook_estado", async (req, res) => {
         const { data: libroData, error: libroError } = await supabase
           .from("libros_urls")
           .select("url_publica")
-          .eq("libro_id", +libroId)
+          .eq("libro_id", String(libroId)) // 👈 corregido
           .limit(1)
           .maybeSingle();
 
@@ -250,7 +250,7 @@ app.get("/webhook_estado", async (req, res) => {
         // Combinar la info del pago con la URL pública
         const pagoConUrl = {
           ...data[0],
-          url_publica: libroData?.url_publica || null,
+          url_publica: libroData?.url_publica || data[0].pdf_url || null, // 👈 aseguramos devolver algo
         };
 
         return res.json({ pago_exitoso: true, data: [pagoConUrl] });
