@@ -90,7 +90,9 @@ app.post("/order", async (req, res) => {
 
     // 🟢 1️⃣ Si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
-      paymentId = data?.id || resource;
+      // Extraer paymentId de forma segura
+      paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
+
       if (!paymentId) {
         console.warn("⚠️ No hay paymentId en el webhook (se ignora).");
         return res.sendStatus(200);
@@ -116,17 +118,21 @@ app.post("/order", async (req, res) => {
 
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
-      amount = pago.transaction_amount || 0;
+      amount = Number(pago.transaction_amount) || 0;
 
-      // Intentar recuperar external_reference si no viene en pago
+      // Recuperar external_reference desde la orden si no viene en pago
       if (!externalReference && pago.order?.id) {
-        const orderResponse = await fetch(
-          `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-          { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-        );
-        if (orderResponse.ok) {
-          const orderData = await orderResponse.json();
-          externalReference = orderData.external_reference;
+        try {
+          const orderResponse = await fetch(
+            `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+          );
+          if (orderResponse.ok) {
+            const orderData = await orderResponse.json();
+            externalReference = orderData.external_reference;
+          }
+        } catch (err) {
+          console.error("❌ Error obteniendo order para externalReference:", err);
         }
       }
     }
@@ -134,15 +140,28 @@ app.post("/order", async (req, res) => {
     // 🟢 2️⃣ Si el webhook viene por "merchant_order"
     if (topic === "merchant_order") {
       console.log("🔹 Webhook merchant_order directo");
-      const orderResponse = await fetch(resource, {
-        headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-      });
+      try {
+        const orderResponse = await fetch(resource, {
+          headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+        });
 
-      if (orderResponse.ok) {
-        const orderData = await orderResponse.json();
-        externalReference = orderData.external_reference;
-        amount =
-          orderData.payments?.reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
+        if (orderResponse.ok) {
+          const orderData = await orderResponse.json();
+          externalReference = orderData.external_reference;
+          amount =
+            orderData.payments
+              ?.filter(p => p.status === "approved")
+              .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
+
+          // Si no hay paymentId, tomarlo del primer pago aprobado de la orden
+          if (!paymentId && Array.isArray(orderData.payments) && orderData.payments.length > 0) {
+            const firstApproved = orderData.payments.find(p => p.status === "approved");
+            paymentId = firstApproved?.id?.toString() || null;
+            if (paymentId) console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
+          }
+        }
+      } catch (err) {
+        console.error("❌ Error consultando merchant_order:", err);
       }
     }
 
@@ -163,7 +182,7 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro (sin importar payment_id)
+    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("id")
@@ -171,7 +190,7 @@ app.post("/order", async (req, res) => {
       .eq("status", "approved")
       .limit(1);
 
-    if (pagoExistente && pagoExistente.length > 0) {
+    if (pagoExistente?.length > 0) {
       console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
       return res.sendStatus(200);
     }
@@ -188,11 +207,10 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: "payment_id" }
+      { onConflict: paymentId ? "payment_id" : undefined } // evitar conflicto si paymentId es null
     );
 
-    if (insertError)
-      console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago guardado correctamente en Supabase");
 
     console.log("✅ Proceso finalizado Webhook /order");
@@ -203,8 +221,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
-
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
