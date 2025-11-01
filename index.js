@@ -90,7 +90,6 @@ app.post("/order", async (req, res) => {
 
     // 🟢 1️⃣ Si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
-      // Extraer paymentId de forma segura
       paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
 
       if (!paymentId) {
@@ -165,6 +164,31 @@ app.post("/order", async (req, res) => {
       }
     }
 
+    // 🆕 🔄  EXTRA: si todavía no tenemos paymentId, intentar recuperarlo desde la orden asociada
+    if (!paymentId && externalReference) {
+      try {
+        console.log("🔁 Intentando obtener payment_id desde merchant_order (fallback)...");
+        const orderSearch = await fetch(
+          `https://api.mercadopago.com/merchant_orders/search?external_reference=${externalReference}`,
+          {
+            headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+          }
+        );
+
+        if (orderSearch.ok) {
+          const { elements } = await orderSearch.json();
+          const firstOrder = elements?.[0];
+          const approved = firstOrder?.payments?.find(p => p.status === "approved");
+          if (approved?.id) {
+            paymentId = approved.id.toString();
+            console.log("✅ payment_id recuperado desde búsqueda de merchant_order:", paymentId);
+          }
+        }
+      } catch (err) {
+        console.error("❌ Error en fallback para obtener payment_id:", err);
+      }
+    }
+
     if (!externalReference) {
       console.warn("❌ No se pudo obtener externalReference");
       return res.sendStatus(200);
@@ -172,6 +196,7 @@ app.post("/order", async (req, res) => {
 
     console.log("📗 Libro (externalReference):", externalReference);
     console.log("💰 Monto:", amount);
+    console.log("💳 payment_id final:", paymentId);
 
     // 🟢 3️⃣ Buscar URL pública del libro
     const { data: libroEncontrado } = await supabase
@@ -207,7 +232,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: paymentId ? "payment_id" : undefined } // evitar conflicto si paymentId es null
+      { onConflict: paymentId ? "payment_id" : undefined }
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
