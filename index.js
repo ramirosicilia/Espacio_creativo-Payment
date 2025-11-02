@@ -118,11 +118,37 @@ app.post("/order", async (req, res) => {
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
 
-      // 🟢 CAMBIO AQUÍ: se agrega total_paid_amount como alternativa
+      // 🧮 Calcular monto real del pago (corregido)
       amount =
         Number(pago.transaction_amount) ||
         Number(pago.transaction_details?.total_paid_amount) ||
+        Number(pago.transaction_details?.net_received_amount) ||
+        Number(pago.transaction_details?.installment_amount) ||
+        (pago.amount_refunded
+          ? Number(pago.transaction_amount || 0) - Number(pago.amount_refunded || 0)
+          : Number(pago.transaction_amount || 0)) ||
         0;
+
+      // 🔁 Si sigue siendo 0, intentar obtenerlo desde merchant_order
+      if (amount === 0 && pago.order?.id) {
+        try {
+          console.log("🔁 Intentando recuperar monto desde merchant_order...");
+          const orderResponse = await fetch(
+            `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+          );
+          if (orderResponse.ok) {
+            const orderData = await orderResponse.json();
+            amount =
+              orderData.payments
+                ?.filter((p) => p.status === "approved")
+                .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
+            console.log("💰 Monto corregido desde merchant_order:", amount);
+          }
+        } catch (err) {
+          console.error("❌ Error obteniendo monto desde merchant_order:", err);
+        }
+      }
 
       // Recuperar external_reference desde la orden si no viene en pago
       if (!externalReference && pago.order?.id) {
@@ -154,12 +180,12 @@ app.post("/order", async (req, res) => {
           externalReference = orderData.external_reference;
           amount =
             orderData.payments
-              ?.filter(p => p.status === "approved")
+              ?.filter((p) => p.status === "approved")
               .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
 
           // Si no hay paymentId, tomarlo del primer pago aprobado de la orden
           if (!paymentId && Array.isArray(orderData.payments) && orderData.payments.length > 0) {
-            const firstApproved = orderData.payments.find(p => p.status === "approved");
+            const firstApproved = orderData.payments.find((p) => p.status === "approved");
             paymentId = firstApproved?.id?.toString() || null;
             if (paymentId) console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
           }
@@ -183,7 +209,7 @@ app.post("/order", async (req, res) => {
         if (orderSearch.ok) {
           const { elements } = await orderSearch.json();
           const firstOrder = elements?.[0];
-          const approved = firstOrder?.payments?.find(p => p.status === "approved");
+          const approved = firstOrder?.payments?.find((p) => p.status === "approved");
           if (approved?.id) {
             paymentId = approved.id.toString();
             console.log("✅ payment_id recuperado desde búsqueda de merchant_order:", paymentId);
@@ -212,7 +238,9 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro
+    // ✅ 4️⃣ Ya no bloqueamos duplicados: se permite comprar el mismo libro varias veces
+    // (se comenta el bloque que lo evitaba)
+    /*
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("id")
@@ -224,23 +252,21 @@ app.post("/order", async (req, res) => {
       console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
       return res.sendStatus(200);
     }
+    */
 
-    // 🟢 5️⃣ Insertar / actualizar en Supabase
-    const { error: insertError } = await supabase.from("pagos").upsert(
-      [
-        {
-          payment_id: paymentId ? String(paymentId) : null,
-          libro_id: String(externalReference),
-          status: "approved",
-          amount,
-          currency: "ARS",
-          pdf_url,
-        },
-      ],
-      { onConflict: paymentId ? "payment_id" : "libro_id" } // ✅ asegura actualización del amount
-    );
+    // 🟢 5️⃣ Insertar como nuevo registro (sin sobrescribir)
+    const { error: insertError } = await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId ? String(paymentId) : null,
+        libro_id: String(externalReference),
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ]);
 
-    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
+    if (insertError) console.error("❌ Error insertando pago en Supabase:", insertError);
     else console.log("✅ Pago guardado correctamente en Supabase");
 
     console.log("✅ Proceso finalizado Webhook /order");
@@ -251,7 +277,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
