@@ -246,7 +246,7 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro
+    // ✅ 4️⃣ Verificar si ya hay pago aprobado para ese libro o cuento
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("*")
@@ -257,7 +257,7 @@ app.post("/order", async (req, res) => {
       const pagoExistenteRow = pagoExistente[0];
 
       if (pagoExistenteRow.amount === 0 && amount > 0) {
-        console.log("🔄 Actualizando pago existente (amount era 0, ahora es válido)");
+        console.log("🔄 Actualizando pago existente (amount era 0, ahora válido)");
         const { error: updateError } = await supabase
           .from("pagos")
           .update({
@@ -269,17 +269,18 @@ app.post("/order", async (req, res) => {
 
         if (updateError) console.error("❌ Error actualizando monto:", updateError);
         else console.log("✅ Monto actualizado correctamente en Supabase");
-      } else {
-        console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
         return res.sendStatus(200);
       }
+
+      console.log("⚠️ Pago ya existente, se ignora duplicado");
+      return res.sendStatus(200);
     }
 
-    // 🟢 5️⃣ Insertar o actualizar en Supabase
+    // 🟢 5️⃣ Insertar o actualizar en Supabase (corrige duplicado en cuentos)
     const { error: insertError } = await supabase.from("pagos").upsert(
       [
         {
-          payment_id: paymentId ? String(paymentId) : null,
+          payment_id: paymentId ? String(paymentId) : `${externalReference}-${Date.now()}`, // fallback único
           libro_id: String(externalReference),
           status: "approved",
           amount,
@@ -287,7 +288,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: "id" } // evita duplicados
+      { onConflict: "payment_id" } // evita duplicados por mismo payment_id
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
@@ -301,7 +302,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
 
 
 // ===========================================================
