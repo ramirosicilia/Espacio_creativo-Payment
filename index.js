@@ -77,7 +77,7 @@ app.post("/create_preference", async (req, res) => {
 // ===========================================================
 // 🧾 WEBHOOK MERCADO PAGO
 // ===========================================================
-aapp.post("/order", async (req, res) => {
+app.post("/order", async (req, res) => {
   try {
     console.log("==================📩 WEBHOOK /order ==================");
     console.log("➡️ BODY COMPLETO:", JSON.stringify(req.body, null, 2));
@@ -92,43 +92,53 @@ aapp.post("/order", async (req, res) => {
     if (topic === "payment" || type === "payment") {
       paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
 
-      // obtener pago
+      if (!paymentId) {
+        console.warn("⚠️ No hay paymentId en el webhook (se ignora).");
+        return res.sendStatus(200);
+      }
+
+      console.log("🔍 Consultando pago con ID:", paymentId);
       const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
         headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
       });
-      const pago = await pagoResponse.json();
 
-      externalReference = pago.external_reference || pago.metadata?.libroId;
-
-      // 🟢 Intentar obtener el monto real del pago aprobado
-      if (pago.order?.id) {
-        const orderResponse = await fetch(
-          `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-          { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-        );
-        const orderData = await orderResponse.json();
-
-        console.log("🧾 Datos merchant_order:", JSON.stringify(orderData, null, 2));
-
-        const pagosAprobados = orderData.payments?.filter(p => p.status === "approved") || [];
-
-        if (pagosAprobados.length > 0) {
-          amount = pagosAprobados.reduce(
-            (sum, p) => sum + Number(p.transaction_amount || p.total_paid_amount || 0),
-            0
-          );
-        }
-
-        // 🔄 Fallback si sigue en 0: usar el monto directo del pago
-        if (!amount || amount === 0) {
-          amount = Number(pago.transaction_amount || pago.total_paid_amount || 0);
-        }
-      } else {
-        // 🔄 Si no hay order.id, usar directamente del pago
-        amount = Number(pago.transaction_amount || pago.total_paid_amount || 0);
+      if (!pagoResponse.ok) {
+        console.error("❌ Error al consultar pago:", await pagoResponse.text());
+        return res.sendStatus(500);
       }
 
-      console.log("💰 Monto calculado (payment):", amount);
+      const pago = await pagoResponse.json();
+      console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
+
+      if (pago.status !== "approved") {
+        console.log("⛔ Pago no aprobado → se ignora.");
+        return res.sendStatus(200);
+      }
+
+      console.log("✅ Pago aprobado");
+      externalReference = pago.external_reference || pago.metadata?.libroId;
+
+      // 🟢 CAMBIO AQUÍ: se agrega total_paid_amount como alternativa
+      amount =
+        Number(pago.transaction_amount) ||
+        Number(pago.transaction_details?.total_paid_amount) ||
+        0;
+
+      // Recuperar external_reference desde la orden si no viene en pago
+      if (!externalReference && pago.order?.id) {
+        try {
+          const orderResponse = await fetch(
+            `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+          );
+          if (orderResponse.ok) {
+            const orderData = await orderResponse.json();
+            externalReference = orderData.external_reference;
+          }
+        } catch (err) {
+          console.error("❌ Error obteniendo order para externalReference:", err);
+        }
+      }
     }
 
     // 🟢 2️⃣ Si el webhook viene por "merchant_order"
@@ -142,26 +152,24 @@ aapp.post("/order", async (req, res) => {
         if (orderResponse.ok) {
           const orderData = await orderResponse.json();
           externalReference = orderData.external_reference;
-          const pagosAprobados = orderData.payments?.filter(p => p.status === "approved") || [];
-          amount = pagosAprobados.reduce(
-            (sum, p) => sum + Number(p.transaction_amount || p.total_paid_amount || 0),
-            0
-          ) || 0;
+          amount =
+            orderData.payments
+              ?.filter(p => p.status === "approved")
+              .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
 
-          // Si no hay paymentId, tomarlo del primer pago aprobado
-          if (!paymentId && pagosAprobados.length > 0) {
-            paymentId = pagosAprobados[0]?.id?.toString() || null;
+          // Si no hay paymentId, tomarlo del primer pago aprobado de la orden
+          if (!paymentId && Array.isArray(orderData.payments) && orderData.payments.length > 0) {
+            const firstApproved = orderData.payments.find(p => p.status === "approved");
+            paymentId = firstApproved?.id?.toString() || null;
             if (paymentId) console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
           }
-
-          console.log("💰 Monto calculado (merchant_order):", amount);
         }
       } catch (err) {
         console.error("❌ Error consultando merchant_order:", err);
       }
     }
 
-    // 🆕 🔄 EXTRA: intentar recuperar paymentId si falta
+    // 🆕 🔄  EXTRA: si todavía no tenemos paymentId, intentar recuperarlo desde la orden asociada
     if (!paymentId && externalReference) {
       try {
         console.log("🔁 Intentando obtener payment_id desde merchant_order (fallback)...");
@@ -180,12 +188,6 @@ aapp.post("/order", async (req, res) => {
             paymentId = approved.id.toString();
             console.log("✅ payment_id recuperado desde búsqueda de merchant_order:", paymentId);
           }
-
-          // También calculamos el monto si sigue vacío
-          if ((!amount || amount === 0) && approved) {
-            amount = Number(approved.transaction_amount || approved.total_paid_amount || 0);
-            console.log("💰 Monto obtenido desde búsqueda fallback:", amount);
-          }
         }
       } catch (err) {
         console.error("❌ Error en fallback para obtener payment_id:", err);
@@ -198,7 +200,7 @@ aapp.post("/order", async (req, res) => {
     }
 
     console.log("📗 Libro (externalReference):", externalReference);
-    console.log("💰 Monto final:", amount);
+    console.log("💰 Monto:", amount);
     console.log("💳 payment_id final:", paymentId);
 
     // 🟢 3️⃣ Buscar URL pública del libro
@@ -210,7 +212,7 @@ aapp.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Validar si ya existe un pago aprobado
+    // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("id")
@@ -235,7 +237,7 @@ aapp.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: paymentId ? "payment_id" : "libro_id" }
+      { onConflict: paymentId ? "payment_id" : "libro_id" } // ✅ asegura actualización del amount
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
@@ -249,7 +251,6 @@ aapp.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
 
 
 // ===========================================================
