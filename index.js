@@ -89,57 +89,32 @@ app.post("/order", async (req, res) => {
     let pdf_url = null;
 
     // 🟢 1️⃣ Si el webhook viene por "payment"
-    if (topic === "payment" || type === "payment") {
-      paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
+    // Si es un webhook de "payment"
+if (topic === "payment" || type === "payment") {
+  paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
 
-      if (!paymentId) {
-        console.warn("⚠️ No hay paymentId en el webhook (se ignora).");
-        return res.sendStatus(200);
-      }
+  // obtener pago
+  const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
+    headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+  });
+  const pago = await pagoResponse.json();
 
-      console.log("🔍 Consultando pago con ID:", paymentId);
-      const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-        headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-      });
+  externalReference = pago.external_reference || pago.metadata?.libroId;
 
-      if (!pagoResponse.ok) {
-        console.error("❌ Error al consultar pago:", await pagoResponse.text());
-        return res.sendStatus(500);
-      }
+  // 🟢 Aquí: buscar merchant_order para asegurar el amount correcto
+  if (pago.order?.id) {
+    const orderResponse = await fetch(
+      `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
+      { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+    );
+    const orderData = await orderResponse.json();
 
-      const pago = await pagoResponse.json();
-      console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
-
-      if (pago.status !== "approved") {
-        console.log("⛔ Pago no aprobado → se ignora.");
-        return res.sendStatus(200);
-      }
-
-      console.log("✅ Pago aprobado");
-      externalReference = pago.external_reference || pago.metadata?.libroId;
-
-      // 🟢 CAMBIO AQUÍ: se agrega total_paid_amount como alternativa
-      amount =
-        Number(pago.transaction_amount) ||
-        Number(pago.transaction_details?.total_paid_amount) ||
-        0;
-
-      // Recuperar external_reference desde la orden si no viene en pago
-      if (!externalReference && pago.order?.id) {
-        try {
-          const orderResponse = await fetch(
-            `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-          );
-          if (orderResponse.ok) {
-            const orderData = await orderResponse.json();
-            externalReference = orderData.external_reference;
-          }
-        } catch (err) {
-          console.error("❌ Error obteniendo order para externalReference:", err);
-        }
-      }
-    }
+    amount =
+      orderData.payments
+        ?.filter(p => p.status === "approved")
+        .reduce((sum, p) => sum + Number(p.transaction_amount || 0), 0) || 0;
+  }
+}
 
     // 🟢 2️⃣ Si el webhook viene por "merchant_order"
     if (topic === "merchant_order") {
