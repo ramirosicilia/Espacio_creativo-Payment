@@ -274,22 +274,31 @@ app.post("/order", async (req, res) => {
 
       console.log("⚠️ Pago ya existente, se ignora duplicado");
       return res.sendStatus(200);
-    }
+    } 
+
+    // 🛑 Evitar registrar webhook vacío o con monto 0
+if (amount === 0) {
+  console.log("⚠️ Webhook con monto 0 ignorado temporalmente");
+  return res.sendStatus(200);
+}
+
 
     // 🟢 5️⃣ Insertar o actualizar en Supabase (corrige duplicado en cuentos)
-    const { error: insertError } = await supabase.from("pagos").upsert(
-      [
-        {
-          payment_id: paymentId ? String(paymentId) : `${externalReference}-${Date.now()}`, // fallback único
-          libro_id: String(externalReference),
-          status: "approved",
-          amount,
-          currency: "ARS",
-          pdf_url,
-        },
-      ],
-      { onConflict:paymentId? "payment_id":"libro_id" } // evita duplicados por mismo payment_id
-    );
+   const { error: insertError } = await supabase
+  .from("pagos")
+  .upsert(
+    [
+      {
+        payment_id: paymentId ? String(paymentId) : `${externalReference}`,
+        libro_id: String(externalReference),
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ],
+    { onConflict: "libro_id" } // 🔹 forzamos a 1 registro por libro/cuento
+  );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
     else console.log("✅ Pago guardado correctamente en Supabase");
