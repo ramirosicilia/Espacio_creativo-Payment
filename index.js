@@ -287,7 +287,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-     { onConflict: ["libro_id", "payment_id"] }
+      { onConflict: "id" } // evita duplicados
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
@@ -301,6 +301,8 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
+
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
