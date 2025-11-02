@@ -185,38 +185,46 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // 🧩 3️⃣ Control anti-duplicado
-    const { data: pagoExistente } = await supabase
+    // 🧩 3️⃣ Control anti-duplicado mejorado
+    const { data: pagosExistentes } = await supabase
       .from("pagos")
       .select("*")
       .eq("libro_id", String(externalReference))
       .eq("status", "approved")
-      .limit(1);
+      .order("created_at", { ascending: false });
 
-    if (pagoExistente?.length > 0) {
-      const row = pagoExistente[0];
+    if (pagosExistentes?.length > 0) {
+      const ultimoPago = pagosExistentes[0];
 
-      if (row.amount === 0 && amount > 0) {
+      const mismoPayment =
+        paymentId && ultimoPago.payment_id && String(ultimoPago.payment_id) === String(paymentId);
+      const mismoAmount = Number(ultimoPago.amount) === Number(amount);
+
+      // ⚙️ Ignorar si es exactamente el mismo pago repetido
+      if (mismoPayment || (mismoAmount && !paymentId)) {
+        console.log("⚠️ Webhook duplicado detectado (mismo payment o mismo monto). Ignorado.");
+        return res.sendStatus(200);
+      }
+
+      // 🔄 Si el registro previo tenía amount=0, actualizarlo
+      if (ultimoPago.amount === 0 && amount > 0) {
         console.log("🔄 Actualizando pago existente con monto válido...");
         const { error: updateError } = await supabase
           .from("pagos")
           .update({
             amount,
-            payment_id: paymentId ?? row.payment_id,
+            payment_id: paymentId ?? ultimoPago.payment_id,
             pdf_url,
           })
-          .eq("id", row.id);
+          .eq("id", ultimoPago.id);
 
         if (updateError) console.error("❌ Error actualizando monto:", updateError);
         else console.log("✅ Pago actualizado correctamente.");
-      } else {
-        console.log("⚠️ Pago duplicado detectado, ignorado.");
+        return res.sendStatus(200);
       }
-
-      return res.sendStatus(200);
     }
 
-    // 🆕 4️⃣ Insertar nuevo pago (libro no existente todavía)
+    // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
     const { error: insertError } = await supabase.from("pagos").insert([
       {
         payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
@@ -239,6 +247,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 
 
