@@ -88,7 +88,7 @@ app.post("/order", async (req, res) => {
     let amount = 0;
     let pdf_url = null;
 
-    // 🟢 1️⃣ Si el webhook viene por "payment"
+    // 🟢 1️⃣ Procesar si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
       paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
 
@@ -108,7 +108,6 @@ app.post("/order", async (req, res) => {
       }
 
       const pago = await pagoResponse.json();
-      console.log("🧾 Datos del pago:", JSON.stringify(pago, null, 2));
 
       if (pago.status !== "approved") {
         console.log("⛔ Pago no aprobado → se ignora.");
@@ -118,65 +117,32 @@ app.post("/order", async (req, res) => {
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
 
-      // 🟢 Monto robusto
+      // 🧮 Monto seguro
       amount =
         Number(pago.transaction_amount) ||
         Number(pago.transaction_details?.total_paid_amount) ||
-        Number(pago.transaction_details?.net_received_amount) ||
-        Number(pago.transaction_details?.installment_amount) ||
-        Number(pago.order?.total_amount) ||
         0;
 
-      // 🧩 Si sigue en 0, intentar recuperar desde merchant_order
+      // 🔁 Si no hay monto, intentar obtenerlo desde la merchant_order
       if (amount === 0 && pago.order?.id) {
         try {
-          const orderResponse = await fetch(
+          const orderResp = await fetch(
             `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
             { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
           );
-          if (orderResponse.ok) {
-            const orderData = await orderResponse.json();
-            const approvedPayments =
-              orderData.payments?.filter((p) => p.status === "approved") || [];
-            amount = approvedPayments.reduce(
-              (sum, p) => sum + (Number(p.transaction_amount) || 0),
-              0
-            );
+          if (orderResp.ok) {
+            const orderData = await orderResp.json();
+            const approved = orderData.payments?.filter(p => p.status === "approved") || [];
+            amount = approved.reduce((s, p) => s + (p.transaction_amount || 0), 0);
             console.log("💵 Monto recuperado desde merchant_order:", amount);
           }
         } catch (err) {
-          console.error("❌ Error recuperando monto desde merchant_order:", err);
-        }
-      }
-
-      if (amount === 0) {
-        const possibleAmount =
-          pago.additional_info?.items?.[0]?.unit_price ||
-          pago.metadata?.amount ||
-          pago.order?.amount ||
-          0;
-        amount = Number(possibleAmount) || 0;
-        console.log("💵 Monto ajustado (fallback):", amount);
-      }
-
-      // Recuperar external_reference desde la orden si no viene en pago
-      if (!externalReference && pago.order?.id) {
-        try {
-          const orderResponse = await fetch(
-            `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
-          );
-          if (orderResponse.ok) {
-            const orderData = await orderResponse.json();
-            externalReference = orderData.external_reference;
-          }
-        } catch (err) {
-          console.error("❌ Error obteniendo order para externalReference:", err);
+          console.error("❌ Error recuperando merchant_order:", err);
         }
       }
     }
 
-    // 🟢 2️⃣ Si el webhook viene por "merchant_order"
+    // 🟢 2️⃣ Procesar si el webhook viene por "merchant_order"
     if (topic === "merchant_order") {
       console.log("🔹 Webhook merchant_order directo");
       try {
@@ -187,44 +153,17 @@ app.post("/order", async (req, res) => {
         if (orderResponse.ok) {
           const orderData = await orderResponse.json();
           externalReference = orderData.external_reference;
-          amount =
-            orderData.payments
-              ?.filter((p) => p.status === "approved")
-              .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
+          const approved = orderData.payments?.filter(p => p.status === "approved") || [];
+          amount = approved.reduce((sum, p) => sum + (p.transaction_amount || 0), 0);
 
-          if (!paymentId && Array.isArray(orderData.payments) && orderData.payments.length > 0) {
-            const firstApproved = orderData.payments.find((p) => p.status === "approved");
-            paymentId = firstApproved?.id?.toString() || null;
-            if (paymentId) console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
+          const firstApproved = approved[0];
+          if (firstApproved?.id) {
+            paymentId = firstApproved.id.toString();
+            console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
           }
         }
       } catch (err) {
         console.error("❌ Error consultando merchant_order:", err);
-      }
-    }
-
-    // 🆕 🔄 Fallback para recuperar paymentId si aún no lo tenemos
-    if (!paymentId && externalReference) {
-      try {
-        console.log("🔁 Intentando obtener payment_id desde merchant_order (fallback)...");
-        const orderSearch = await fetch(
-          `https://api.mercadopago.com/merchant_orders/search?external_reference=${externalReference}`,
-          {
-            headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-          }
-        );
-
-        if (orderSearch.ok) {
-          const { elements } = await orderSearch.json();
-          const firstOrder = elements?.[0];
-          const approved = firstOrder?.payments?.find((p) => p.status === "approved");
-          if (approved?.id) {
-            paymentId = approved.id.toString();
-            console.log("✅ payment_id recuperado desde búsqueda de merchant_order:", paymentId);
-          }
-        }
-      } catch (err) {
-        console.error("❌ Error en fallback para obtener payment_id:", err);
       }
     }
 
@@ -237,7 +176,7 @@ app.post("/order", async (req, res) => {
     console.log("💰 Monto:", amount);
     console.log("💳 payment_id final:", paymentId);
 
-    // 🟢 3️⃣ Buscar URL pública del libro
+    // 🧾 Buscar URL pública
     const { data: libroEncontrado } = await supabase
       .from("libros_urls")
       .select("url_publica")
@@ -246,53 +185,51 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Verificar si ya hay pago aprobado para ese libro o cuento
+    // 🧩 3️⃣ Control anti-duplicado
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("*")
       .eq("libro_id", String(externalReference))
-      .eq("status", "approved");
+      .eq("status", "approved")
+      .limit(1);
 
     if (pagoExistente?.length > 0) {
-      const pagoExistenteRow = pagoExistente[0];
+      const row = pagoExistente[0];
 
-      if (pagoExistenteRow.amount === 0 && amount > 0) {
-        console.log("🔄 Actualizando pago existente (amount era 0, ahora válido)");
+      if (row.amount === 0 && amount > 0) {
+        console.log("🔄 Actualizando pago existente con monto válido...");
         const { error: updateError } = await supabase
           .from("pagos")
           .update({
             amount,
-            payment_id: paymentId ? String(paymentId) : pagoExistenteRow.payment_id,
+            payment_id: paymentId ?? row.payment_id,
             pdf_url,
           })
-          .eq("id", pagoExistenteRow.id);
+          .eq("id", row.id);
 
         if (updateError) console.error("❌ Error actualizando monto:", updateError);
-        else console.log("✅ Monto actualizado correctamente en Supabase");
-        return res.sendStatus(200);
+        else console.log("✅ Pago actualizado correctamente.");
+      } else {
+        console.log("⚠️ Pago duplicado detectado, ignorado.");
       }
 
-      console.log("⚠️ Pago ya existente, se ignora duplicado");
       return res.sendStatus(200);
     }
 
-    // 🟢 5️⃣ Insertar o actualizar en Supabase (corrige duplicado en cuentos)
-    const { error: insertError } = await supabase.from("pagos").upsert(
-      [
-        {
-          payment_id: paymentId ? String(paymentId) : `${externalReference}-${Date.now()}`, // fallback único
-          libro_id: String(externalReference),
-          status: "approved",
-          amount,
-          currency: "ARS",
-          pdf_url,
-        },
-      ],
-      { onConflict:paymentId? "payment_id":"libro_id" } // evita duplicados por mismo payment_id
-    );
+    // 🆕 4️⃣ Insertar nuevo pago (libro no existente todavía)
+    const { error: insertError } = await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+        libro_id: String(externalReference),
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ]);
 
-    if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
-    else console.log("✅ Pago guardado correctamente en Supabase");
+    if (insertError) console.error("❌ Error insertando pago:", insertError);
+    else console.log("✅ Pago insertado correctamente.");
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
@@ -302,6 +239,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 
 // ===========================================================
