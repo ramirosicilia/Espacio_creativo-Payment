@@ -118,16 +118,10 @@ app.post("/order", async (req, res) => {
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
 
-      // 🟢 Monto robusto
-      amount =
-        Number(pago.transaction_amount) ||
-        Number(pago.transaction_details?.total_paid_amount) ||
-        Number(pago.transaction_details?.net_received_amount) ||
-        Number(pago.transaction_details?.installment_amount) ||
-        Number(pago.order?.total_amount) ||
-        0;
+      // 💰 Captura directa del monto desde transaction_amount
+      amount = Number(pago.transaction_amount) || 0;
 
-      // 🧩 Si sigue en 0, intentar recuperar desde merchant_order
+      // Si llega sin amount, intentar recuperar desde merchant_order
       if (amount === 0 && pago.order?.id) {
         try {
           const orderResponse = await fetch(
@@ -159,7 +153,7 @@ app.post("/order", async (req, res) => {
         console.log("💵 Monto ajustado (fallback):", amount);
       }
 
-      // Recuperar external_reference desde la orden si no viene en pago
+      // Recuperar external_reference desde la orden si no vino
       if (!externalReference && pago.order?.id) {
         try {
           const orderResponse = await fetch(
@@ -203,31 +197,6 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🆕 🔄 Fallback para recuperar paymentId si aún no lo tenemos
-    if (!paymentId && externalReference) {
-      try {
-        console.log("🔁 Intentando obtener payment_id desde merchant_order (fallback)...");
-        const orderSearch = await fetch(
-          `https://api.mercadopago.com/merchant_orders/search?external_reference=${externalReference}`,
-          {
-            headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-          }
-        );
-
-        if (orderSearch.ok) {
-          const { elements } = await orderSearch.json();
-          const firstOrder = elements?.[0];
-          const approved = firstOrder?.payments?.find((p) => p.status === "approved");
-          if (approved?.id) {
-            paymentId = approved.id.toString();
-            console.log("✅ payment_id recuperado desde búsqueda de merchant_order:", paymentId);
-          }
-        }
-      } catch (err) {
-        console.error("❌ Error en fallback para obtener payment_id:", err);
-      }
-    }
-
     if (!externalReference) {
       console.warn("❌ No se pudo obtener externalReference");
       return res.sendStatus(200);
@@ -246,7 +215,7 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // ✅ 4️⃣ Verificar si ya hay pago aprobado para ese libro o cuento
+    // ✅ 4️⃣ Verificar si ya existe un pago
     const { data: pagoExistente } = await supabase
       .from("pagos")
       .select("*")
@@ -272,15 +241,15 @@ app.post("/order", async (req, res) => {
         return res.sendStatus(200);
       }
 
-      console.log("⚠️ Pago ya existente, se ignora duplicado");
+      console.log("⚠️ Pago ya existente con monto válido, se ignora duplicado");
       return res.sendStatus(200);
     }
 
-    // 🟢 5️⃣ Insertar o actualizar en Supabase (corrige duplicado en cuentos)
+    // 🟢 5️⃣ Insertar nuevo pago (sin duplicados)
     const { error: insertError } = await supabase.from("pagos").upsert(
       [
         {
-          payment_id: paymentId ? String(paymentId) : `${externalReference}-${Date.now()}`, // fallback único
+          payment_id: paymentId ? String(paymentId) : String(externalReference), // 👈 sin Date.now()
           libro_id: String(externalReference),
           status: "approved",
           amount,
@@ -288,7 +257,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: "payment_id" } // evita duplicados por mismo payment_id
+      { onConflict: "libro_id" } // 👈 evita duplicados por libro_id
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
@@ -302,6 +271,7 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
+
 
 
 // ===========================================================
