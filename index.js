@@ -147,7 +147,18 @@ app.post("/order", async (req, res) => {
         } catch (err) {
           console.error("❌ Error recuperando monto desde merchant_order:", err);
         }
+      } 
+
+            if (amount === 0) {
+        const possibleAmount =
+          pago.additional_info?.items?.[0]?.unit_price ||
+          pago.metadata?.amount ||
+          pago.order?.amount ||
+          0;
+        amount = Number(possibleAmount) || 0;
+        console.log("💵 Monto ajustado (fallback):", amount);
       }
+
 
       // Recuperar external_reference desde la orden si no viene en pago
       if (!externalReference && pago.order?.id) {
@@ -262,7 +273,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: paymentId ? "payment_id" : "libro_id" } // evita duplicados y actualiza si corresponde
+      { onConflict:"payment_id" } // evita duplicados y actualiza si corresponde
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
