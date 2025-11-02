@@ -287,7 +287,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict: "payment_id" } // evita duplicados
+     { onConflict: ["libro_id", "payment_id"] }
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
