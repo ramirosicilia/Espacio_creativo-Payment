@@ -118,7 +118,7 @@ app.post("/order", async (req, res) => {
       console.log("✅ Pago aprobado");
       externalReference = pago.external_reference || pago.metadata?.libroId;
 
-      // 🟢 Monto robusto (maneja diferentes estructuras de MercadoPago)
+      // 🟢 Monto robusto
       amount =
         Number(pago.transaction_amount) ||
         Number(pago.transaction_details?.total_paid_amount) ||
@@ -127,7 +127,7 @@ app.post("/order", async (req, res) => {
         Number(pago.order?.total_amount) ||
         0;
 
-      // 🧩 Si sigue en 0, intentar recuperar desde la orden asociada
+      // 🧩 Si sigue en 0, intentar recuperar desde merchant_order
       if (amount === 0 && pago.order?.id) {
         try {
           const orderResponse = await fetch(
@@ -147,9 +147,9 @@ app.post("/order", async (req, res) => {
         } catch (err) {
           console.error("❌ Error recuperando monto desde merchant_order:", err);
         }
-      } 
+      }
 
-            if (amount === 0) {
+      if (amount === 0) {
         const possibleAmount =
           pago.additional_info?.items?.[0]?.unit_price ||
           pago.metadata?.amount ||
@@ -158,7 +158,6 @@ app.post("/order", async (req, res) => {
         amount = Number(possibleAmount) || 0;
         console.log("💵 Monto ajustado (fallback):", amount);
       }
-
 
       // Recuperar external_reference desde la orden si no viene en pago
       if (!externalReference && pago.order?.id) {
@@ -193,7 +192,6 @@ app.post("/order", async (req, res) => {
               ?.filter((p) => p.status === "approved")
               .reduce((sum, p) => sum + (p.transaction_amount || 0), 0) || 0;
 
-          // Si no hay paymentId, tomarlo del primer pago aprobado de la orden
           if (!paymentId && Array.isArray(orderData.payments) && orderData.payments.length > 0) {
             const firstApproved = orderData.payments.find((p) => p.status === "approved");
             paymentId = firstApproved?.id?.toString() || null;
@@ -205,7 +203,7 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🆕 🔄 EXTRA: Fallback para recuperar paymentId si aún no lo tenemos
+    // 🆕 🔄 Fallback para recuperar paymentId si aún no lo tenemos
     if (!paymentId && externalReference) {
       try {
         console.log("🔁 Intentando obtener payment_id desde merchant_order (fallback)...");
@@ -251,14 +249,30 @@ app.post("/order", async (req, res) => {
     // ✅ 4️⃣ Validar si ya existe un pago aprobado para ese libro
     const { data: pagoExistente } = await supabase
       .from("pagos")
-      .select("id")
+      .select("*")
       .eq("libro_id", String(externalReference))
-      .eq("status", "approved")
-      .limit(1);
+      .eq("status", "approved");
 
     if (pagoExistente?.length > 0) {
-      console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
-      return res.sendStatus(200);
+      const pagoExistenteRow = pagoExistente[0];
+
+      if (pagoExistenteRow.amount === 0 && amount > 0) {
+        console.log("🔄 Actualizando pago existente (amount era 0, ahora es válido)");
+        const { error: updateError } = await supabase
+          .from("pagos")
+          .update({
+            amount,
+            payment_id: paymentId ? String(paymentId) : pagoExistenteRow.payment_id,
+            pdf_url,
+          })
+          .eq("id", pagoExistenteRow.id);
+
+        if (updateError) console.error("❌ Error actualizando monto:", updateError);
+        else console.log("✅ Monto actualizado correctamente en Supabase");
+      } else {
+        console.log("⚠️ Ya hay un pago aprobado para este libro, se ignora duplicado");
+        return res.sendStatus(200);
+      }
     }
 
     // 🟢 5️⃣ Insertar o actualizar en Supabase
@@ -273,7 +287,7 @@ app.post("/order", async (req, res) => {
           pdf_url,
         },
       ],
-      { onConflict:"payment_id" } // evita duplicados y actualiza si corresponde
+      { onConflict: "payment_id" } // evita duplicados
     );
 
     if (insertError) console.error("❌ Error insertando/actualizando Supabase:", insertError);
@@ -287,7 +301,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
 
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
