@@ -256,56 +256,65 @@ app.post("/order", async (req, res) => {
 // ===========================================================
 app.get("/webhook_estado", async (req, res) => {
   try {
-    const { libroId, payment_id } = req.query;
+    const { libroId } = req.query;
+    if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
-    if (!libroId || !payment_id) {
-      return res.status(400).json({ error: "Faltan parámetros libroId o payment_id" });
-    }
+    console.log("📘 Consultando estado del libro:", libroId);
 
-    console.log("📘 Consultando estado del pago:", { libroId, payment_id });
-
-    // Buscar el pago específico (libro + payment_id)
+    // 🧾 Trae todos los pagos aprobados para ese libro
     const { data, error } = await supabase
       .from("pagos")
       .select("*")
       .eq("libro_id", String(libroId))
-      .eq("payment_id", String(payment_id))
       .eq("status", "approved")
-      .order("created_at", { ascending: false })
-      .maybeSingle();
+      .order("created_at", { ascending: false });
 
     if (error) throw error;
 
-    if (!data) {
-      console.log("⚠️ No se encontró pago aprobado con ese payment_id");
-      return res.json({ pago_exitoso: false, data: [] });
+    if (data && data.length > 0) {
+      const pago = data[0];
+      console.log("✅ Pago encontrado:", pago);
+
+      // 🔎 Verificar si ese payment_id ya estaba en la base antes del último insert
+      const { data: repetido, error: errRepetido } = await supabase
+        .from("pagos")
+        .select("payment_id")
+        .eq("payment_id", pago.payment_id);
+
+      if (errRepetido) throw errRepetido;
+
+      // Si ya había un registro previo con el mismo payment_id, no devolvemos nada
+      if (repetido && repetido.length > 1) {
+        console.log("⚠️ Pago ya existente, no se envía el cuento:", pago.payment_id);
+        return res.json({ pago_exitoso: false, data: [] });
+      }
+
+      // 📗 Si no está repetido, devolvemos el acceso
+      const { data: libroData } = await supabase
+        .from("libros_urls")
+        .select("url_publica")
+        .eq("libro_id", String(libroId))
+        .maybeSingle();
+
+      const pagoConUrl = {
+        ...pago,
+        url_publica: libroData?.url_publica || pago.pdf_url || null,
+      };
+
+      return res.json({
+        pago_exitoso: true,
+        data: [{ ...pagoConUrl, payment_id: pago.payment_id }],
+      });
     }
 
-    console.log("✅ Pago encontrado:", data);
-
-    // Obtener URL del libro
-    const { data: libroData } = await supabase
-      .from("libros_urls")
-      .select("url_publica")
-      .eq("libro_id", String(libroId))
-      .maybeSingle();
-
-    const pagoConUrl = {
-      ...data,
-      url_publica: libroData?.url_publica || data.pdf_url || null,
-    };
-
-    return res.json({
-      pago_exitoso: true,
-      data: [{ ...pagoConUrl, payment_id }],
-    });
+    console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
+    res.json({ pago_exitoso: false, data: [] });
 
   } catch (err) {
     console.error("❌ Error en /webhook_estado:", err);
     res.status(500).json({ error: "Error al consultar el pago" });
   }
 });
-
 
 // ===========================================================
 app.listen(port, () =>
