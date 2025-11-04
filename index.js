@@ -285,9 +285,13 @@ app.get("/webhook_estado", async (req, res) => {
         url_publica: libroData?.url_publica || pago.pdf_url || null,
       };
 
-      return res.json({ pago_exitoso: true, data: [pagoConUrl] });
-    }
-
+      return res.json({ 
+        pago_exitoso: true, 
+        data: [{ ...pagoConUrl, payment_id: pago.payment_id }] 
+      });
+      
+          }
+        
     console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
     res.json({ pago_exitoso: false, data: [] });
   } catch (err) {
