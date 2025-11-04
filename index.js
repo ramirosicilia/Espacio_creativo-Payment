@@ -254,6 +254,9 @@ app.post("/order", async (req, res) => {
 // ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
 // ===========================================================
+// ===========================================================
+// ✅ CONSULTA DESDE EL FRONT: /webhook_estado
+// ===========================================================
 app.get("/webhook_estado", async (req, res) => {
   try {
     const { libroId } = req.query;
@@ -261,6 +264,7 @@ app.get("/webhook_estado", async (req, res) => {
 
     console.log("📘 Consultando estado del libro:", libroId);
 
+    // Consulta base: todos los pagos aprobados
     const { data, error } = await supabase
       .from("pagos")
       .select("*")
@@ -271,8 +275,13 @@ app.get("/webhook_estado", async (req, res) => {
     if (error) throw error;
 
     if (data && data.length > 0) {
-      const pago = data[0];
-      console.log("✅ Pago encontrado:", pago);
+      // 🔎 Filtra duplicados de payment_id
+      const pagosUnicos = data.filter(
+        (p, i, arr) => arr.findIndex(x => x.payment_id === p.payment_id) === i
+      );
+
+      const pago = pagosUnicos[0];
+      console.log("✅ Pago único encontrado:", pago);
 
       const { data: libroData } = await supabase
         .from("libros_urls")
@@ -285,14 +294,13 @@ app.get("/webhook_estado", async (req, res) => {
         url_publica: libroData?.url_publica || pago.pdf_url || null,
       };
 
-      return res.json({ 
-        pago_exitoso: true, 
-        data: [{ ...pagoConUrl, payment_id: pago.payment_id }] 
+      return res.json({
+        pago_exitoso: true,
+        data: [{ ...pagoConUrl, payment_id: pago.payment_id }],
       });
-      
-          }
-        
-    console.log("⚠️ No se encontró pago aprobado para libroId:", libroId);
+    }
+
+    console.log("⚠️ No se encontró pago aprobado o todos están duplicados para libroId:", libroId);
     res.json({ pago_exitoso: false, data: [] });
   } catch (err) {
     console.error("❌ Error en /webhook_estado:", err);
@@ -300,7 +308,6 @@ app.get("/webhook_estado", async (req, res) => {
   }
 });
 
-// ===========================================================
 app.listen(port, () =>
   console.log(`✅ Servidor backend escuchando en http://localhost:${port}`)
 );
