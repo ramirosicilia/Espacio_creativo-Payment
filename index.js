@@ -227,19 +227,27 @@ app.post("/order", async (req, res) => {
     }
 
     // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
-    const sessionId = pago?.metadata?.session_id || (externalReference.split("-")[1] ?? null); // ✅ uso seguro con ?
+    let sessionId = null;
 
-    await supabase.from("pagos").insert([
-      {
-        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-        libro_id: String(externalReference.split("-")[0]),
-        session_id: sessionId, // ✅ Nuevo campo
-        status: "approved",
-        amount,
-        currency: "ARS",
-        pdf_url,
-      },
-    ]);
+// ✅ Obtener sessionId desde pago.metadata o desde externalReference
+if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
+  sessionId = pago.metadata.session_id;
+} else if (externalReference?.includes("-")) {
+  // Si el externalReference tiene un guion (por ejemplo: "1-1762306031511-irvroy")
+  sessionId = externalReference.split("-")[1];
+}
+
+await supabase.from("pagos").insert([
+  {
+    payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+    libro_id: String(externalReference.split("-")[0]),
+    session_id: sessionId || null, // ✅ ahora nunca se queda undefined
+    status: "approved",
+    amount,
+    currency: "ARS",
+    pdf_url,
+  },
+]);
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
