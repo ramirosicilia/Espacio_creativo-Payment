@@ -88,6 +88,7 @@ app.post("/order", async (req, res) => {
     let externalReference = null;
     let amount = 0;
     let pdf_url = null;
+    let pago = null; // ✅ FIX: ahora 'pago' existe en todo el bloque
 
     // 🟢 1️⃣ Procesar si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
@@ -108,7 +109,7 @@ app.post("/order", async (req, res) => {
         return res.sendStatus(500);
       }
 
-      const pago = await pagoResponse.json();
+      pago = await pagoResponse.json();
 
       if (pago.status !== "approved") {
         console.log("⛔ Pago no aprobado → se ignora.");
@@ -222,41 +223,40 @@ app.post("/order", async (req, res) => {
           .eq("id", ultimoPago.id);
 
         if (updateError) console.error("❌ Error actualizando monto:", updateError);
-              else console.log("✅ Pago actualizado correctamente.");
-              return res.sendStatus(200);
-            }
-          } 
-        
-                       // 🆕 session_id consistente en todo el flujo
-                  const sessionId =
-                    pago.metadata?.session_id ||
-                    req.query.sessionId ||
-                    (externalReference.includes("-") ? externalReference.split("-")[1] : null);
-        
-      const { error: insertError } = await supabase.from("pagos").insert([
-        {
-          payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-          libro_id: String(externalReference),
-          session_id: sessionId, // ✅ Nuevo campo
-          status: "approved",
-          amount,
-          currency: "ARS",
-          pdf_url,
-        },
-      ]);
-      
-      if (insertError) console.error("❌ Error insertando pago:", insertError);
-      else console.log("✅ Pago insertado correctamente con session_id:", sessionId);
-      
-      console.log("✅ Proceso finalizado Webhook /order");
-      console.log("===============================================================");
-      return res.sendStatus(200);
+        else console.log("✅ Pago actualizado correctamente.");
+        return res.sendStatus(200);
+      }
+    }
 
-        } catch (error) {
-          console.error("🔥 ERROR en webhook /order:", error);
-          res.sendStatus(500);
-        }
-      });
+    // 🆕 session_id consistente en todo el flujo
+    const sessionId =
+      pago?.metadata?.session_id ||
+      req.query.sessionId ||
+      (externalReference.includes("-") ? externalReference.split("-")[1] : null);
+
+    const { error: insertError } = await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+        libro_id: String(externalReference),
+        session_id: sessionId, // ✅ Nuevo campo
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ]);
+
+    if (insertError) console.error("❌ Error insertando pago:", insertError);
+    else console.log("✅ Pago insertado correctamente con session_id:", sessionId);
+
+    console.log("✅ Proceso finalizado Webhook /order");
+    console.log("===============================================================");
+    return res.sendStatus(200);
+  } catch (error) {
+    console.error("🔥 ERROR en webhook /order:", error);
+    res.sendStatus(500);
+  }
+});
 
 
 
