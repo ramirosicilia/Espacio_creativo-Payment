@@ -88,6 +88,7 @@ app.post("/order", async (req, res) => {
     let externalReference = null;
     let amount = 0;
     let pdf_url = null;
+    let pago = null; // ✅ agregado para evitar ReferenceError
 
     // 🟢 1️⃣ Procesar si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
@@ -108,7 +109,7 @@ app.post("/order", async (req, res) => {
         return res.sendStatus(500);
       }
 
-      const pago = await pagoResponse.json();
+      pago = await pagoResponse.json(); // ✅ guardamos el pago en la variable global
 
       if (pago.status !== "approved") {
         console.log("⛔ Pago no aprobado → se ignora.");
@@ -226,20 +227,19 @@ app.post("/order", async (req, res) => {
     }
 
     // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
-   const sessionId = pago.metadata?.session_id || (externalReference.split("-")[1] ?? null);
+    const sessionId = pago?.metadata?.session_id || (externalReference.split("-")[1] ?? null); // ✅ uso seguro con ?
 
-await supabase.from("pagos").insert([
-  {
-    payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-    libro_id: String(externalReference.split("-")[0]),
-    session_id: sessionId, // ✅ Nuevo campo
-    status: "approved",
-    amount,
-    currency: "ARS",
-    pdf_url,
-  },
-]);
-
+    await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+        libro_id: String(externalReference.split("-")[0]),
+        session_id: sessionId, // ✅ Nuevo campo
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ]);
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
@@ -253,7 +253,6 @@ await supabase.from("pagos").insert([
 
 
 
-// ===========================================================
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
 // ===========================================================
 app.get("/webhook_estado", async (req, res) => {
