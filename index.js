@@ -184,6 +184,7 @@ app.post("/order", async (req, res) => {
       .select("url_publica")
       .eq("libro_id", String(externalReference))
       .eq("session_id", req.query.sessionId || null)
+      .or(`session_id.eq.${req.query.sessionId},session_id.is.null`)
       .maybeSingle();
 
     pdf_url = libroEncontrado?.url_publica || null;
@@ -232,7 +233,20 @@ app.post("/order", async (req, res) => {
     const sessionId =
       pago?.metadata?.session_id ||
       req.query.sessionId ||
-      (externalReference.includes("-") ? externalReference.split("-")[1] : null);
+      (externalReference.includes("-") ? externalReference.split("-")[1] : null); 
+
+      // 🚫 Evitar duplicado por payment_id repetido
+      const { data: existePago } = await supabase
+        .from("pagos")
+        .select("id")
+        .eq("payment_id", paymentId)
+        .maybeSingle();
+
+      if (existePago) {
+        console.log(`⚠️ Pago ya registrado con payment_id=${paymentId}, se ignora duplicado.`);
+        return res.sendStatus(200);
+      }
+
 
     const { error: insertError } = await supabase.from("pagos").insert([
       {
