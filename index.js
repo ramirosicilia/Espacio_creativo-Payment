@@ -238,17 +238,6 @@ if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
   sessionId = externalReference.split("-")[1];
 }
 
-await supabase.from("pagos").insert([
-  {
-    payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-    libro_id: String(externalReference.split("-")[0]),
-    session_id: sessionId || null, // ✅ ahora nunca se queda undefined
-    status: "approved",
-    amount,
-    currency: "ARS",
-    pdf_url,
-  },
-]);
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
