@@ -250,7 +250,7 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🆕 4️⃣ Insertar nuevo pago (solo si no existe)
+    // 🆕 4️⃣ Insertar nuevo pago (solo si no existe y realmente aprobado)
     let sessionId = null;
 
     if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
@@ -259,23 +259,10 @@ app.post("/order", async (req, res) => {
       sessionId = externalReference.split("-")[1];
     }
 
-    // 🔎 Si no hay paymentId válido, buscar uno previo o generar seguro
-    if (!paymentId) {
-      const { data: previo } = await supabase
-        .from("pagos")
-        .select("payment_id")
-        .eq("libro_id", libroIdLimpio)
-        .eq("status", "approved")
-        .order("created_at", { ascending: false })
-        .limit(1);
-
-      if (previo && previo.length > 0) {
-        paymentId = previo[0].payment_id;
-        console.log("♻️ Reutilizando payment_id previo:", paymentId);
-      } else {
-        paymentId = `${externalReference}-${Date.now()}`;
-        console.log("🆔 Generado fallback payment_id:", paymentId);
-      }
+    // 🚫 Evitar insertar si el pago no está realmente aprobado o sin monto
+    if (!paymentId || amount <= 0) {
+      console.warn("⛔ No se inserta pago: falta paymentId o monto inválido (posible pago pendiente)");
+      return res.sendStatus(200);
     }
 
     // 🚫 Evitar duplicado real
