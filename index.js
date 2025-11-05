@@ -199,20 +199,23 @@ app.post("/order", async (req, res) => {
     console.log("💰 Monto:", amount);
     console.log("💳 payment_id final:", paymentId);
 
-    // 🧾 Buscar URL pública
-    const { data: libroEncontrado } = await supabase
+    // 🧾 Buscar URL pública ANTES DE INSERTAR EL PAGO
+    const libroIdLimpio = String(externalReference).split("-")[0];
+    const { data: libroEncontrado, error: errorLibro } = await supabase
       .from("libros_urls")
       .select("url_publica")
-      .eq("libro_id", String(externalReference))
+      .eq("libro_id", libroIdLimpio)
       .maybeSingle();
 
+    if (errorLibro) console.error("❌ Error consultando libros_urls:", errorLibro);
     pdf_url = libroEncontrado?.url_publica || null;
+    console.log("📎 URL pública asociada:", pdf_url);
 
     // 🧩 3️⃣ Control anti-duplicado
     const { data: pagosExistentes } = await supabase
       .from("pagos")
       .select("*")
-      .eq("libro_id", String(externalReference))
+      .eq("libro_id", libroIdLimpio)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
@@ -261,7 +264,7 @@ app.post("/order", async (req, res) => {
       const { data: previo } = await supabase
         .from("pagos")
         .select("payment_id")
-        .eq("libro_id", String(externalReference.split("-")[0]))
+        .eq("libro_id", libroIdLimpio)
         .eq("status", "approved")
         .order("created_at", { ascending: false })
         .limit(1);
@@ -287,11 +290,11 @@ app.post("/order", async (req, res) => {
       return res.sendStatus(200);
     }
 
-    // 🚀 Insertar nuevo pago
+    // 🚀 Insertar nuevo pago (ya con pdf_url correcto)
     await supabase.from("pagos").insert([
       {
         payment_id: paymentId,
-        libro_id: String(externalReference.split("-")[0]),
+        libro_id: libroIdLimpio,
         session_id: sessionId || null,
         status: "approved",
         amount,
@@ -308,8 +311,6 @@ app.post("/order", async (req, res) => {
     res.sendStatus(500);
   }
 });
-
-
 
 
 // ✅ CONSULTA DESDE EL FRONT: /webhook_estado
