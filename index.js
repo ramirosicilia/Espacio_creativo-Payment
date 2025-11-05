@@ -89,11 +89,12 @@ app.post("/order", async (req, res) => {
     let externalReference = null;
     let amount = 0;
     let pdf_url = null;
-    let pago = null; // ✅ agregado para evitar ReferenceError
+    let pago = null;
 
     // 🟢 1️⃣ Procesar si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
-      paymentId = data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
+      paymentId =
+        data?.id || (typeof resource === "string" ? resource.split("/").pop() : null);
 
       if (!paymentId) {
         console.warn("⚠️ No hay paymentId en el webhook (se ignora).");
@@ -101,16 +102,21 @@ app.post("/order", async (req, res) => {
       }
 
       console.log("🔍 Consultando pago con ID:", paymentId);
-      const pagoResponse = await fetch(`https://api.mercadopago.com/v1/payments/${paymentId}`, {
-        headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
-      });
+      const pagoResponse = await fetch(
+        `https://api.mercadopago.com/v1/payments/${paymentId}`,
+        {
+          headers: {
+            Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
+          },
+        }
+      );
 
       if (!pagoResponse.ok) {
         console.error("❌ Error al consultar pago:", await pagoResponse.text());
         return res.sendStatus(500);
       }
 
-      pago = await pagoResponse.json(); // ✅ guardamos el pago en la variable global
+      pago = await pagoResponse.json();
 
       if (pago.status !== "approved") {
         console.log("⛔ Pago no aprobado → se ignora.");
@@ -126,17 +132,25 @@ app.post("/order", async (req, res) => {
         Number(pago.transaction_details?.total_paid_amount) ||
         0;
 
-      // 🔁 Si no hay monto, intentar obtenerlo desde la merchant_order
+      // 🔁 Si no hay monto, intentar obtenerlo desde merchant_order
       if (amount === 0 && pago.order?.id) {
         try {
           const orderResp = await fetch(
             `https://api.mercadopago.com/merchant_orders/${pago.order.id}`,
-            { headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` } }
+            {
+              headers: {
+                Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
+              },
+            }
           );
           if (orderResp.ok) {
             const orderData = await orderResp.json();
-            const approved = orderData.payments?.filter(p => p.status === "approved") || [];
-            amount = approved.reduce((s, p) => s + (p.transaction_amount || 0), 0);
+            const approved =
+              orderData.payments?.filter((p) => p.status === "approved") || [];
+            amount = approved.reduce(
+              (s, p) => s + (p.transaction_amount || 0),
+              0
+            );
             console.log("💵 Monto recuperado desde merchant_order:", amount);
           }
         } catch (err) {
@@ -150,14 +164,20 @@ app.post("/order", async (req, res) => {
       console.log("🔹 Webhook merchant_order directo");
       try {
         const orderResponse = await fetch(resource, {
-          headers: { Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}` },
+          headers: {
+            Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
+          },
         });
 
         if (orderResponse.ok) {
           const orderData = await orderResponse.json();
           externalReference = orderData.external_reference;
-          const approved = orderData.payments?.filter(p => p.status === "approved") || [];
-          amount = approved.reduce((sum, p) => sum + (p.transaction_amount || 0), 0);
+          const approved =
+            orderData.payments?.filter((p) => p.status === "approved") || [];
+          amount = approved.reduce(
+            (sum, p) => sum + (p.transaction_amount || 0),
+            0
+          );
 
           const firstApproved = approved[0];
           if (firstApproved?.id) {
@@ -188,7 +208,7 @@ app.post("/order", async (req, res) => {
 
     pdf_url = libroEncontrado?.url_publica || null;
 
-    // 🧩 3️⃣ Control anti-duplicado mejorado
+    // 🧩 3️⃣ Control anti-duplicado
     const { data: pagosExistentes } = await supabase
       .from("pagos")
       .select("*")
@@ -198,18 +218,17 @@ app.post("/order", async (req, res) => {
 
     if (pagosExistentes?.length > 0) {
       const ultimoPago = pagosExistentes[0];
-
       const mismoPayment =
-        paymentId && ultimoPago.payment_id && String(ultimoPago.payment_id) === String(paymentId);
+        paymentId &&
+        ultimoPago.payment_id &&
+        String(ultimoPago.payment_id) === String(paymentId);
       const mismoAmount = Number(ultimoPago.amount) === Number(amount);
 
-      // ⚙️ Ignorar si es exactamente el mismo pago repetido
       if (mismoPayment || (mismoAmount && !paymentId)) {
-        console.log("⚠️ Webhook duplicado detectado (mismo payment o mismo monto). Ignorado.");
+        console.log("⚠️ Webhook duplicado detectado. Ignorado.");
         return res.sendStatus(200);
       }
 
-      // 🔄 Si el registro previo tenía amount=0, actualizarlo
       if (ultimoPago.amount === 0 && amount > 0) {
         console.log("🔄 Actualizando pago existente con monto válido...");
         const { error: updateError } = await supabase
@@ -221,25 +240,67 @@ app.post("/order", async (req, res) => {
           })
           .eq("id", ultimoPago.id);
 
-        if (updateError) console.error("❌ Error actualizando monto:", updateError);
+        if (updateError)
+          console.error("❌ Error actualizando monto:", updateError);
         else console.log("✅ Pago actualizado correctamente.");
         return res.sendStatus(200);
       }
     }
 
-    // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
+    // 🆕 4️⃣ Insertar nuevo pago (solo si no existe)
     let sessionId = null;
 
-// ✅ Obtener sessionId desde pago.metadata o desde externalReference
-if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
-  sessionId = pago.metadata.session_id;
-} else if (externalReference?.includes("-")) {
-  // Si el externalReference tiene un guion (por ejemplo: "1-1762306031511-irvroy")
-  sessionId = externalReference.split("-")[1];
-}
+    if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
+      sessionId = pago.metadata.session_id;
+    } else if (externalReference?.includes("-")) {
+      sessionId = externalReference.split("-")[1];
+    }
 
+    // 🔎 Si no hay paymentId válido, buscar uno previo o generar seguro
+    if (!paymentId) {
+      const { data: previo } = await supabase
+        .from("pagos")
+        .select("payment_id")
+        .eq("libro_id", String(externalReference.split("-")[0]))
+        .eq("status", "approved")
+        .order("created_at", { ascending: false })
+        .limit(1);
 
-    console.log("✅ Proceso finalizado Webhook /order");
+      if (previo && previo.length > 0) {
+        paymentId = previo[0].payment_id;
+        console.log("♻️ Reutilizando payment_id previo:", paymentId);
+      } else {
+        paymentId = `${externalReference}-${Date.now()}`;
+        console.log("🆔 Generado fallback payment_id:", paymentId);
+      }
+    }
+
+    // 🚫 Evitar duplicado real
+    const { data: existePago } = await supabase
+      .from("pagos")
+      .select("id")
+      .eq("payment_id", paymentId)
+      .maybeSingle();
+
+    if (existePago) {
+      console.log("⚠️ Pago ya existente en base, no se inserta:", paymentId);
+      return res.sendStatus(200);
+    }
+
+    // 🚀 Insertar nuevo pago
+    await supabase.from("pagos").insert([
+      {
+        payment_id: paymentId,
+        libro_id: String(externalReference.split("-")[0]),
+        session_id: sessionId || null,
+        status: "approved",
+        amount,
+        currency: "ARS",
+        pdf_url,
+      },
+    ]);
+
+    console.log("✅ Pago insertado correctamente:", paymentId);
     console.log("===============================================================");
     return res.sendStatus(200);
   } catch (error) {
