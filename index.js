@@ -54,9 +54,9 @@ app.post("/create_preference", async (req, res) => {
       metadata: {
         libroId: mp[0].id,
         categoria: mp[0].categoria,
-          session_id: mp[0].session_id,  // ✅ NUEVO
+        session_id: mp[0].session_id,  // ✅ NUEVO
       },
-     external_reference: `${mp[0].id}-${mp[0].session_id}`,
+      external_reference: mp[0].id,
       notification_url: `${process.env.URL_PAYMENTS}/order`,
       back_urls: {
         success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
@@ -88,7 +88,6 @@ app.post("/order", async (req, res) => {
     let externalReference = null;
     let amount = 0;
     let pdf_url = null;
-    let pago = null; // ✅ FIX: ahora 'pago' existe en todo el bloque
 
     // 🟢 1️⃣ Procesar si el webhook viene por "payment"
     if (topic === "payment" || type === "payment") {
@@ -109,7 +108,7 @@ app.post("/order", async (req, res) => {
         return res.sendStatus(500);
       }
 
-      pago = await pagoResponse.json();
+      const pago = await pagoResponse.json();
 
       if (pago.status !== "approved") {
         console.log("⛔ Pago no aprobado → se ignora.");
@@ -183,8 +182,6 @@ app.post("/order", async (req, res) => {
       .from("libros_urls")
       .select("url_publica")
       .eq("libro_id", String(externalReference))
-      .eq("session_id", req.query.sessionId || null)
-      .or(`session_id.eq.${req.query.sessionId},session_id.is.null`)
       .maybeSingle();
 
     pdf_url = libroEncontrado?.url_publica || null;
@@ -194,7 +191,6 @@ app.post("/order", async (req, res) => {
       .from("pagos")
       .select("*")
       .eq("libro_id", String(externalReference))
-      .eq("session_id", req.query.sessionId)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
@@ -229,39 +225,21 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🆕 session_id consistente en todo el flujo
-    const sessionId =
-      pago?.metadata?.session_id ||
-      req.query.sessionId ||
-      (externalReference.includes("-") ? externalReference.split("-")[1] : null); 
+    // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
+   const sessionId = pago.metadata?.session_id || (externalReference.split("-")[1] ?? null);
 
-      // 🚫 Evitar duplicado por payment_id repetido
-      const { data: existePago } = await supabase
-        .from("pagos")
-        .select("id")
-        .eq("payment_id", paymentId)
-        .maybeSingle();
+await supabase.from("pagos").insert([
+  {
+    payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+    libro_id: String(externalReference.split("-")[0]),
+    session_id: sessionId, // ✅ Nuevo campo
+    status: "approved",
+    amount,
+    currency: "ARS",
+    pdf_url,
+  },
+]);
 
-      if (existePago) {
-        console.log(`⚠️ Pago ya registrado con payment_id=${paymentId}, se ignora duplicado.`);
-        return res.sendStatus(200);
-      }
-
-
-    const { error: insertError } = await supabase.from("pagos").insert([
-      {
-        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-        libro_id: String(externalReference),
-        session_id: sessionId, // ✅ Nuevo campo
-        status: "approved",
-        amount,
-        currency: "ARS",
-        pdf_url,
-      },
-    ]);
-
-    if (insertError) console.error("❌ Error insertando pago:", insertError);
-    else console.log("✅ Pago insertado correctamente con session_id:", sessionId);
 
     console.log("✅ Proceso finalizado Webhook /order");
     console.log("===============================================================");
@@ -319,7 +297,6 @@ app.get("/webhook_estado", async (req, res) => {
         .from("libros_urls")
         .select("url_publica")
         .eq("libro_id", String(libroId))
-        .eq("session_id", req.query.sessionId || null)
         .maybeSingle();
 
       const pagoConUrl = {
