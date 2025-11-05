@@ -56,7 +56,8 @@ app.post("/create_preference", async (req, res) => {
         categoria: mp[0].categoria,
         session_id: mp[0].session_id,  // ✅ NUEVO
       },
-      external_reference: mp[0].id,
+     external_reference: `${mp[0].id}-${mp[0].session_id}`,
+
       notification_url: `${process.env.URL_PAYMENTS}/order`,
       back_urls: {
         success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
@@ -265,27 +266,30 @@ await supabase.from("pagos").insert([
 // ===========================================================
 app.get("/webhook_estado", async (req, res) => {
   try {
-    const { libroId } = req.query;
+    const { libroId, sessionId } = req.query;
     if (!libroId) return res.status(400).json({ error: "Falta libroId" });
 
-    console.log("📘 Consultando estado del libro:", libroId);
+    console.log("📘 Consultando estado del libro:", libroId, "sessionId:", sessionId);
 
-    // 🧾 Trae todos los pagos aprobados para ese libro
-    const { data, error } = await supabase
+    // 🧾 Consulta base
+    const query = supabase
       .from("pagos")
       .select("*")
       .eq("libro_id", String(libroId))
-      .eq("session_id", req.query.sessionId || null)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
+    // ✅ Filtra por session_id solo si viene
+    if (sessionId) query.eq("session_id", sessionId);
+
+    const { data, error } = await query;
     if (error) throw error;
 
     if (data && data.length > 0) {
       const pago = data[0];
       console.log("✅ Pago encontrado:", pago);
 
-      // 🔎 Verificar si ese payment_id ya estaba en la base antes del último insert
+      // 🔎 Verificar si ya existía ese payment_id
       const { data: repetido, error: errRepetido } = await supabase
         .from("pagos")
         .select("payment_id")
@@ -293,13 +297,13 @@ app.get("/webhook_estado", async (req, res) => {
 
       if (errRepetido) throw errRepetido;
 
-      // Si ya había un registro previo con el mismo payment_id, no devolvemos nada
+      // ⚠️ Si hay más de un registro con el mismo payment_id, no se devuelve
       if (repetido && repetido.length > 1) {
         console.log("⚠️ Pago ya existente, no se envía el cuento:", pago.payment_id);
         return res.json({ pago_exitoso: false, data: [] });
       }
 
-      // 📗 Si no está repetido, devolvemos el acceso
+      // 📗 Traer URL del libro
       const { data: libroData } = await supabase
         .from("libros_urls")
         .select("url_publica")
