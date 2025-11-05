@@ -54,8 +54,9 @@ app.post("/create_preference", async (req, res) => {
       metadata: {
         libroId: mp[0].id,
         categoria: mp[0].categoria,
+          session_id: mp[0].session_id,  // ✅ NUEVO
       },
-      external_reference: mp[0].id,
+     external_reference: `${mp[0].id}-${mp[0].session_id}`,
       notification_url: `${process.env.URL_PAYMENTS}/order`,
       back_urls: {
         success: `${process.env.URL_FRONT}/comprar/${mp[0].categoria}/${mp[0].id}`,
@@ -181,6 +182,7 @@ app.post("/order", async (req, res) => {
       .from("libros_urls")
       .select("url_publica")
       .eq("libro_id", String(externalReference))
+      .eq("session_id", req.query.sessionId || null)
       .maybeSingle();
 
     pdf_url = libroEncontrado?.url_publica || null;
@@ -190,6 +192,7 @@ app.post("/order", async (req, res) => {
       .from("pagos")
       .select("*")
       .eq("libro_id", String(externalReference))
+      .eq("session_id", req.query.sessionId)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
@@ -219,34 +222,41 @@ app.post("/order", async (req, res) => {
           .eq("id", ultimoPago.id);
 
         if (updateError) console.error("❌ Error actualizando monto:", updateError);
-        else console.log("✅ Pago actualizado correctamente.");
-        return res.sendStatus(200);
-      }
-    }
+              else console.log("✅ Pago actualizado correctamente.");
+              return res.sendStatus(200);
+            }
+          } 
+        
+                       // 🆕 session_id consistente en todo el flujo
+                  const sessionId =
+                    pago.metadata?.session_id ||
+                    req.query.sessionId ||
+                    (externalReference.includes("-") ? externalReference.split("-")[1] : null);
+        
+      const { error: insertError } = await supabase.from("pagos").insert([
+        {
+          payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
+          libro_id: String(externalReference),
+          session_id: sessionId, // ✅ Nuevo campo
+          status: "approved",
+          amount,
+          currency: "ARS",
+          pdf_url,
+        },
+      ]);
+      
+      if (insertError) console.error("❌ Error insertando pago:", insertError);
+      else console.log("✅ Pago insertado correctamente con session_id:", sessionId);
+      
+      console.log("✅ Proceso finalizado Webhook /order");
+      console.log("===============================================================");
+      return res.sendStatus(200);
 
-    // 🆕 4️⃣ Insertar nuevo pago (nuevo pago real)
-    const { error: insertError } = await supabase.from("pagos").insert([
-      {
-        payment_id: paymentId ?? `${externalReference}-${Date.now()}`,
-        libro_id: String(externalReference),
-        status: "approved",
-        amount,
-        currency: "ARS",
-        pdf_url,
-      },
-    ]);
-
-    if (insertError) console.error("❌ Error insertando pago:", insertError);
-    else console.log("✅ Pago insertado correctamente.");
-
-    console.log("✅ Proceso finalizado Webhook /order");
-    console.log("===============================================================");
-    return res.sendStatus(200);
-  } catch (error) {
-    console.error("🔥 ERROR en webhook /order:", error);
-    res.sendStatus(500);
-  }
-});
+        } catch (error) {
+          console.error("🔥 ERROR en webhook /order:", error);
+          res.sendStatus(500);
+        }
+      });
 
 
 
@@ -266,6 +276,7 @@ app.get("/webhook_estado", async (req, res) => {
       .from("pagos")
       .select("*")
       .eq("libro_id", String(libroId))
+      .eq("session_id", req.query.sessionId || null)
       .eq("status", "approved")
       .order("created_at", { ascending: false });
 
@@ -294,6 +305,7 @@ app.get("/webhook_estado", async (req, res) => {
         .from("libros_urls")
         .select("url_publica")
         .eq("libro_id", String(libroId))
+        .eq("session_id", req.query.sessionId || null)
         .maybeSingle();
 
       const pagoConUrl = {
