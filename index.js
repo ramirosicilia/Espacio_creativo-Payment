@@ -162,32 +162,10 @@ app.post("/order", async (req, res) => {
     // 🟢 2️⃣ Procesar si el webhook viene por "merchant_order"
     if (topic === "merchant_order") {
       console.log("🔹 Webhook merchant_order directo");
-      try {
-        const orderResponse = await fetch(resource, {
-          headers: {
-            Authorization: `Bearer ${process.env.MERCADO_PAGO_ACCESS_TOKEN}`,
-          },
-        });
 
-        if (orderResponse.ok) {
-          const orderData = await orderResponse.json();
-          externalReference = orderData.external_reference;
-          const approved =
-            orderData.payments?.filter((p) => p.status === "approved") || [];
-          amount = approved.reduce(
-            (sum, p) => sum + (p.transaction_amount || 0),
-            0
-          );
-
-          const firstApproved = approved[0];
-          if (firstApproved?.id) {
-            paymentId = firstApproved.id.toString();
-            console.log("🆔 payment_id recuperado desde merchant_order:", paymentId);
-          }
-        }
-      } catch (err) {
-        console.error("❌ Error consultando merchant_order:", err);
-      }
+      // 🧱 Evitar insertar antes de tener payment_id real
+      console.log("🕓 Esperando webhook de pago real (sin payment_id).");
+      return res.sendStatus(200);
     }
 
     if (!externalReference) {
@@ -211,52 +189,25 @@ app.post("/order", async (req, res) => {
     pdf_url = libroEncontrado?.url_publica || null;
     console.log("📎 URL pública asociada:", pdf_url);
 
-    // 🧩 3️⃣ Control anti-duplicado
-    const { data: pagosExistentes } = await supabase
-      .from("pagos")
-      .select("*")
-      .eq("libro_id", libroIdLimpio)
-      .eq("status", "approved")
-      .order("created_at", { ascending: false });
-
-    if (pagosExistentes?.length > 0) {
-      const ultimoPago = pagosExistentes[0];
-      const mismoPayment =
-        paymentId &&
-        ultimoPago.payment_id &&
-        String(ultimoPago.payment_id) === String(paymentId);
-      const mismoAmount = Number(ultimoPago.amount) === Number(amount);
-
-      if (mismoPayment || (mismoAmount && !paymentId)) {
-        console.log("⚠️ Webhook duplicado detectado. Ignorado.");
-        return res.sendStatus(200);
-      }
-
-      if (ultimoPago.amount === 0 && amount > 0) {
-        console.log("🔄 Actualizando pago existente con monto válido...");
-        const { error: updateError } = await supabase
-          .from("pagos")
-          .update({
-            amount,
-            payment_id: paymentId ?? ultimoPago.payment_id,
-            pdf_url,
-          })
-          .eq("id", ultimoPago.id);
-
-        if (updateError)
-          console.error("❌ Error actualizando monto:", updateError);
-        else console.log("✅ Pago actualizado correctamente.");
-        return res.sendStatus(200);
-      }
-    }
-
-    // 🆕 4️⃣ Insertar nuevo pago (solo si no existe)
+    // 🆕 Obtener session_id (para control de duplicados)
     let sessionId = null;
-
     if (typeof pago !== "undefined" && pago?.metadata?.session_id) {
       sessionId = pago.metadata.session_id;
     } else if (externalReference?.includes("-")) {
       sessionId = externalReference.split("-")[1];
+    }
+
+    // 🚫 Evitar duplicado real (por payment_id o session_id)
+    const { data: existePago } = await supabase
+      .from("pagos")
+      .select("id")
+      .or(`payment_id.eq.${paymentId},session_id.eq.${sessionId}`)
+      .eq("libro_id", libroIdLimpio)
+      .maybeSingle();
+
+    if (existePago) {
+      console.log("⚠️ Pago ya existente (por payment_id o session_id). No se inserta.");
+      return res.sendStatus(200);
     }
 
     // 🔎 Si no hay paymentId válido, buscar uno previo o generar seguro
@@ -278,24 +229,12 @@ app.post("/order", async (req, res) => {
       }
     }
 
-    // 🚫 Evitar duplicado real
-    const { data: existePago } = await supabase
-      .from("pagos")
-      .select("id")
-      .eq("payment_id", paymentId)
-      .maybeSingle();
-
-    if (existePago) {
-      console.log("⚠️ Pago ya existente en base, no se inserta:", paymentId);
-      return res.sendStatus(200);
-    }
-
     // 🚀 Insertar nuevo pago (ya con pdf_url correcto)
     await supabase.from("pagos").insert([
       {
         payment_id: paymentId,
         libro_id: libroIdLimpio,
-        session_id: pago?.metadata?.session_id || sessionId || null,
+        session_id: sessionId || null,
         status: "approved",
         amount,
         currency: "ARS",
